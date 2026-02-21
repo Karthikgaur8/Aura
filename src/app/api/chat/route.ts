@@ -1,6 +1,7 @@
 // ============================================================
 // api/chat/route.ts — Dev B
-// LLM streaming endpoint using Vercel AI SDK v3
+// LLM streaming endpoint using Vercel AI SDK
+// Handles text streaming + tool calls (chart, trade receipt)
 // ============================================================
 
 import { streamText } from 'ai';
@@ -11,17 +12,27 @@ import { renderStockChartTool, generateTradeReceiptTool } from '@/lib/tools';
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
-    const { messages } = await req.json();
+    try {
+        const { messages } = await req.json();
 
-    const result = await streamText({
-        model: openai('gpt-4o-mini'),
-        system: SYSTEM_PROMPT,
-        messages,
-        tools: {
-            render_stock_chart: renderStockChartTool,
-            generate_trade_receipt: generateTradeReceiptTool,
-        },
-    });
+        const result = await streamText({
+            model: openai('gpt-4o-mini'),
+            system: SYSTEM_PROMPT,
+            messages,
+            tools: {
+                render_stock_chart: renderStockChartTool,
+                generate_trade_receipt: generateTradeReceiptTool,
+            },
+            maxToolRoundtrips: 2,
+        });
 
-    return result.toAIStreamResponse();
+        return result.toDataStreamResponse();
+    } catch (error: unknown) {
+        console.error('[/api/chat] Error:', error);
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        return new Response(JSON.stringify({ error: message }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+        });
+    }
 }
