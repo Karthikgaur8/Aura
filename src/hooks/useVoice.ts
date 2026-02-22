@@ -26,12 +26,20 @@ export function useVoice() {
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const onResultRef = useRef<((text: string) => void) | null>(null);
 
-    // Check browser support on mount
+    // Check browser support + preload voices on mount
     useEffect(() => {
         if (typeof window !== 'undefined') {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
             setIsSupported(!!SpeechRecognition);
+
+            // Preload TTS voices (they load async in most browsers)
+            window.speechSynthesis?.getVoices();
+            if (window.speechSynthesis) {
+                window.speechSynthesis.onvoiceschanged = () => {
+                    window.speechSynthesis.getVoices();
+                };
+            }
         }
     }, []);
 
@@ -52,7 +60,7 @@ export function useVoice() {
         }
 
         const recognition = new SpeechRecognition();
-        recognition.continuous = false;        // Stop after one phrase
+        recognition.continuous = true;         // Keep listening until user stops
         recognition.interimResults = true;     // Show interim results for visual feedback
         recognition.lang = 'en-US';
         recognition.maxAlternatives = 1;
@@ -188,14 +196,14 @@ export function useVoice() {
         utterance.pitch = 0.9;
         utterance.volume = 1.0;
 
-        // Try to pick a natural-sounding voice
+        // Pick a consistent English voice — prevents random accent switching
         const voices = window.speechSynthesis.getVoices();
-        const preferredVoice = voices.find(
-            (v) =>
-                v.name.includes('Google') ||
-                v.name.includes('Natural') ||
-                v.name.includes('Daniel')
-        );
+        const preferredVoice =
+            voices.find(v => v.lang === 'en-US' && v.name.includes('Google')) ||
+            voices.find(v => v.lang === 'en-US' && v.name.includes('Natural')) ||
+            voices.find(v => v.lang === 'en-US' && v.name.includes('Microsoft')) ||
+            voices.find(v => v.lang === 'en-US') ||
+            voices.find(v => v.lang.startsWith('en'));
         if (preferredVoice) {
             utterance.voice = preferredVoice;
         }
