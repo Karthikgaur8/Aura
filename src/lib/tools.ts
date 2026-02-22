@@ -13,6 +13,31 @@ function getBaseUrl(): string {
     return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 }
 
+/** Tool: Get a live stock quote */
+export const getStockQuoteTool = {
+    description:
+        'Get a live, real-time price quote for a given stock or crypto ticker. Use this when the user asks for the current price or how a specific stock is doing right now.',
+    parameters: z.object({
+        ticker: z.string().describe('The stock or crypto ticker symbol, e.g. AAPL, BTC, NVDA'),
+    }),
+    execute: async ({ ticker }: { ticker: string }) => {
+        const normalizedTicker = ticker.toUpperCase();
+        try {
+            const res = await fetch(
+                `${getBaseUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&action=quote`
+            );
+            if (!res.ok) {
+                return { ticker: normalizedTicker, error: 'Failed to fetch quote' };
+            }
+            const data = await res.json();
+            return data;
+        } catch (error) {
+            console.error('[get_stock_quote] Error:', error);
+            return { ticker: normalizedTicker, error: 'Market data unavailable' };
+        }
+    },
+};
+
 /** Tool: Render a stock chart for a given ticker */
 export const renderStockChartTool = {
     description:

@@ -158,11 +158,12 @@ export default function Home() {
   // ── Adapt messages for ChatMessages component ──
   const adaptedMessages: ChatMessage[] = chat.messages
     .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .filter((m) => m.content) // filter out empty tool-only messages
+    .filter((m) => m.content || (m.toolInvocations && m.toolInvocations.length > 0))
     .map((m) => ({
       id: m.id,
       role: m.role as 'user' | 'assistant',
       content: m.content,
+      toolInvocations: m.toolInvocations,
     }));
 
   // ── Handlers ──
