@@ -30,7 +30,7 @@ CRYPTO_SYMBOLS = {
 
 def _api_url(path: str) -> str:
     """Build full Alpaca API URL."""
-    return f"{ALPACA_BASE_URL}/v2{path}"
+    return f"{ALPACA_BASE_URL}/{path}"
 
 
 def is_crypto(ticker: str) -> bool:
