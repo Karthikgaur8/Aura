@@ -153,4 +153,6 @@ def get_stock_quote(ticker: str) -> dict:
         'change': round(change, 2),
         'changePercent': round(change_percent, 2),
         'volume': int(daily_bar.get('v', 0)),
+        'asOf': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        'source': 'alpaca'
     }

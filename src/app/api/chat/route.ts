@@ -7,7 +7,7 @@
 import { streamText } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { SYSTEM_PROMPT } from '@/lib/ai';
-import { renderStockChartTool, generateTradeReceiptTool } from '@/lib/tools';
+import { renderStockChartTool, generateTradeReceiptTool, getStockQuoteTool } from '@/lib/tools';
 
 export const maxDuration = 30;
 
@@ -20,10 +20,11 @@ export async function POST(req: Request) {
             system: SYSTEM_PROMPT,
             messages,
             tools: {
+                get_stock_quote: getStockQuoteTool,
                 render_stock_chart: renderStockChartTool,
                 generate_trade_receipt: generateTradeReceiptTool,
             },
-            maxToolRoundtrips: 2,
+            maxToolRoundtrips: 3,
         });
 
         return result.toDataStreamResponse();

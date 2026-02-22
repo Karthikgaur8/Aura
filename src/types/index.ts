@@ -25,6 +25,9 @@ export interface StockQuote {
   change: number;
   changePercent: number;
   volume: number;
+  asOf?: string;
+  source?: string;
+  error?: string;
 }
 
 /** Trade order request */

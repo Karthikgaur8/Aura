@@ -6,11 +6,14 @@
 
 import React, { useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import QuoteCard from './QuoteCard';
 
 export interface ChatMessage {
     id: string;
     role: 'user' | 'assistant';
     content: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    toolInvocations?: any[];
 }
 
 interface ChatMessagesProps {
@@ -52,26 +55,43 @@ export default function ChatMessages({ messages, isLoading }: ChatMessagesProps)
                             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                         >
-                            <div
-                                className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${msg.role === 'user'
-                                        ? 'rounded-br-md'
-                                        : 'rounded-bl-md'
-                                    }`}
-                                style={
-                                    msg.role === 'user'
-                                        ? {
-                                            background: 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(139,92,246,0.15))',
-                                            border: '1px solid rgba(139,92,246,0.2)',
-                                            color: '#e4e4e7',
+                            <div className="flex flex-col gap-2">
+                                {/* Text Bubble (only render if there's text) */}
+                                {msg.content && (
+                                    <div
+                                        className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${msg.role === 'user'
+                                            ? 'rounded-br-md self-end'
+                                            : 'rounded-bl-md self-start'
+                                            }`}
+                                        style={
+                                            msg.role === 'user'
+                                                ? {
+                                                    background: 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(139,92,246,0.15))',
+                                                    border: '1px solid rgba(139,92,246,0.2)',
+                                                    color: '#e4e4e7',
+                                                }
+                                                : {
+                                                    background: 'rgba(255,255,255,0.05)',
+                                                    border: '1px solid rgba(255,255,255,0.08)',
+                                                    color: '#d4d4d8',
+                                                }
                                         }
-                                        : {
-                                            background: 'rgba(255,255,255,0.05)',
-                                            border: '1px solid rgba(255,255,255,0.08)',
-                                            color: '#d4d4d8',
-                                        }
-                                }
-                            >
-                                {msg.content}
+                                    >
+                                        {msg.content}
+                                    </div>
+                                )}
+
+                                {/* Inline Tool Rendering (Cards) */}
+                                {msg.toolInvocations?.map((invocation, idx) => {
+                                    if (invocation.toolName === 'get_stock_quote' && invocation.state === 'result') {
+                                        return (
+                                            <div key={idx} className="self-start">
+                                                <QuoteCard quote={invocation.result} />
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })}
                             </div>
                         </motion.div>
                     ))}
