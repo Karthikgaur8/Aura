@@ -7,10 +7,9 @@
 import { z } from 'zod/v3';
 import type { StockBar, TradeReceipt } from '@/types';
 
-// Internal helper — absolute URL builder for server-side fetch
-function getBaseUrl(): string {
-    // In production, use NEXT_PUBLIC_APP_URL; in dev, default to localhost
-    return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+// Internal helper — absolute URL builder for server-side fetch to backend
+function getBackendUrl(): string {
+    return process.env.BACKEND_URL || 'http://localhost:8000';
 }
 
 /** Tool: Get a live stock quote */
@@ -24,7 +23,7 @@ export const getStockQuoteTool = {
         const normalizedTicker = ticker.toUpperCase();
         try {
             const res = await fetch(
-                `${getBaseUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&action=quote`
+                `${getBackendUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&action=quote`
             );
             if (!res.ok) {
                 return { ticker: normalizedTicker, error: 'Failed to fetch quote' };
@@ -51,7 +50,7 @@ export const renderStockChartTool = {
         const normalizedPeriod = period || '1M';
         try {
             const res = await fetch(
-                `${getBaseUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&period=${normalizedPeriod}`
+                `${getBackendUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&period=${normalizedPeriod}`
             );
             if (!res.ok) {
                 return { ticker: normalizedTicker, period: normalizedPeriod, bars: [] as StockBar[], error: 'Failed to fetch market data' };
@@ -75,7 +74,7 @@ export const generateTradeReceiptTool = {
         'Generate a trade confirmation receipt for the user to review before executing. Use this when the user wants to buy or sell a stock.',
     parameters: z.object({
         ticker: z.string().describe('The stock ticker symbol'),
-        qty: z.number().describe('Number of shares to trade, must be positive'),
+        qty: z.number().describe('Number of shares to trade, must be positive. Fractional/decimal values are allowed for crypto.'),
         side: z.enum(['buy', 'sell']).describe('Whether to buy or sell'),
         orderType: z.enum(['market', 'limit', 'stop', 'stop_limit']).describe('The order type. Default to market if not specified.'),
         stopLoss: z.number().nullable().describe('Stop loss price if the user wants one, or null if not applicable'),
@@ -98,7 +97,7 @@ export const generateTradeReceiptTool = {
         let currentPrice = 0;
         try {
             const res = await fetch(
-                `${getBaseUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&action=quote`
+                `${getBackendUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&action=quote`
             );
             if (res.ok) {
                 const quote = await res.json();
@@ -109,6 +108,38 @@ export const generateTradeReceiptTool = {
         }
 
         const estimatedTotal = currentPrice * qty;
+        let errorMessage: string | undefined = undefined;
+
+        // Perform Trade Validation
+        try {
+            if (side === 'buy') {
+                const acctRes = await fetch(`${getBackendUrl()}/api/trade?action=account`);
+                if (acctRes.ok) {
+                    const acct = await acctRes.json();
+                    if (estimatedTotal > acct.buyingPower) {
+                        errorMessage = `Insufficient buying power. Required: $${estimatedTotal.toFixed(2)}, Available: $${acct.buyingPower.toFixed(2)}`;
+                    }
+                }
+            } else if (side === 'sell') {
+                const posRes = await fetch(`${getBackendUrl()}/api/trade?action=positions`);
+                if (posRes.ok) {
+                    const positions = await posRes.json();
+                    // Strip trailing 'USD' for comparison (Alpaca returns BTCUSD, user says BTC)
+                    const stripUsd = (t: string) => t.endsWith('USD') && t.length > 3 ? t.slice(0, -3) : t;
+                    const pos = positions.find((p: any) =>
+                        p.ticker === normalizedTicker ||
+                        stripUsd(p.ticker) === stripUsd(normalizedTicker)
+                    );
+                    if (!pos) {
+                        errorMessage = `You do not own any shares of ${normalizedTicker} to sell.`;
+                    } else if (qty > pos.qty) {
+                        errorMessage = `Insufficient shares. You only own ${pos.qty} shares of ${normalizedTicker}.`;
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[generate_trade_receipt] Validation fetch error:', error);
+        }
 
         return {
             ticker: normalizedTicker,
@@ -118,6 +149,7 @@ export const generateTradeReceiptTool = {
             estimatedTotal,
             currentPrice,
             stopLoss: stopLoss ?? undefined,
+            error: errorMessage,
         };
     },
 };

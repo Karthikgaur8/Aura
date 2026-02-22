@@ -152,15 +152,21 @@ def submit_order(
 
     # --- Determine if this is a crypto trade ---
     crypto = is_crypto(ticker)
+    # Normalize crypto tickers to Alpaca's required format (BTC -> BTC/USD, BTCUSD -> BTC/USD)
     symbol = normalize_crypto_symbol(ticker) if crypto else ticker.upper()
 
     # --- Build the order payload ---
+    # Crypto must ALWAYS use 'gtc'. For stocks, fractional orders require 'day'.
+    if crypto:
+        tif = 'gtc'
+    else:
+        tif = 'day'
+
     order_data: dict = {
         'symbol': symbol,
         'side': side,
         'type': order_type,
-        # Crypto trades 24/7, so use 'gtc'; stocks use 'day'
-        'time_in_force': 'gtc' if crypto else 'day',
+        'time_in_force': tif,
     }
 
     # Use notional (dollar amount) or qty
@@ -182,6 +188,7 @@ def submit_order(
         order_data['order_class'] = 'oto'
         order_data['stop_loss'] = {'stop_price': str(stop_loss)}
 
+    print(f"[submit_order] Sending to Alpaca: {order_data}")
     try:
         resp = requests.post(_api_url('/orders'), headers=HEADERS, json=order_data)
         resp.raise_for_status()

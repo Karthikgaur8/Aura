@@ -7,7 +7,7 @@
 'use client';
 
 import { useChat, type Message } from 'ai/react';
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { StockBar, TradeReceipt, AppState } from '@/types';
 
 /** Chart data extracted from a render_stock_chart tool call */
@@ -17,15 +17,10 @@ export interface ChartData {
     bars: StockBar[];
 }
 
-export function useAuraChat(options?: { onFinish?: (text: string) => void }) {
+export function useAuraChat() {
     const chat = useChat({
         api: '/api/chat',
         initialMessages: [],
-        onFinish: (message) => {
-            if (options?.onFinish && message.content) {
-                options.onFinish(message.content);
-            }
-        },
     });
 
     // Derived state from tool invocations
@@ -33,28 +28,41 @@ export function useAuraChat(options?: { onFinish?: (text: string) => void }) {
     const [tradeReceipt, setTradeReceipt] = useState<TradeReceipt | null>(null);
     const [appState, setAppState] = useState<AppState>('entry');
 
-    // Parse tool invocations from the latest assistant message
+    // Track which tool invocations we've already processed/cleared so old receipts don't resurface
+    const processedToolCallIds = useRef<Set<string>>(new Set());
+
+    // Parse tool invocations from ALL assistant messages, but skip already-processed ones
     useEffect(() => {
-        const lastAssistantMessage = [...chat.messages]
-            .reverse()
-            .find((m: Message) => m.role === 'assistant');
+        let latestChart: ChartData | null = null;
+        let latestReceipt: { data: TradeReceipt; id: string } | null = null;
 
-        if (!lastAssistantMessage?.toolInvocations) return;
+        for (const msg of chat.messages) {
+            if (msg.role !== 'assistant' || !msg.toolInvocations) continue;
 
-        for (const invocation of lastAssistantMessage.toolInvocations) {
-            if (invocation.state !== 'result') continue;
+            for (const invocation of msg.toolInvocations) {
+                if (invocation.state !== 'result') continue;
+                const callId = `${msg.id}-${invocation.toolName}`;
 
-            if (invocation.toolName === 'render_stock_chart' && invocation.result) {
-                const result = invocation.result as ChartData;
-                setChartData(result);
-                setAppState('data-render');
+                // Skip invocations we've already processed and cleared
+                if (processedToolCallIds.current.has(callId)) continue;
+
+                if (invocation.toolName === 'render_stock_chart' && invocation.result) {
+                    latestChart = invocation.result as ChartData;
+                }
+
+                if (invocation.toolName === 'generate_trade_receipt' && invocation.result) {
+                    latestReceipt = { data: invocation.result as TradeReceipt, id: callId };
+                }
             }
+        }
 
-            if (invocation.toolName === 'generate_trade_receipt' && invocation.result) {
-                const result = invocation.result as TradeReceipt;
-                setTradeReceipt(result);
-                setAppState('trade-confirm');
-            }
+        if (latestChart) {
+            setChartData(latestChart);
+            setAppState('data-render');
+        }
+        if (latestReceipt) {
+            setTradeReceipt(latestReceipt.data);
+            setAppState('trade-confirm');
         }
     }, [chat.messages]);
 
@@ -64,12 +72,21 @@ export function useAuraChat(options?: { onFinish?: (text: string) => void }) {
         setAppState('entry');
     }, []);
 
-    /** Clear trade receipt — after execution or cancel */
+    /** Clear trade receipt — mark its tool call ID as processed so it won't resurface */
     const clearReceipt = useCallback(() => {
+        // Mark ALL current receipt invocations as processed
+        for (const msg of chat.messages) {
+            if (msg.role !== 'assistant' || !msg.toolInvocations) continue;
+            for (const invocation of msg.toolInvocations) {
+                if (invocation.toolName === 'generate_trade_receipt' && invocation.state === 'result') {
+                    processedToolCallIds.current.add(`${msg.id}-${invocation.toolName}`);
+                }
+            }
+        }
         setTradeReceipt(null);
         // Go back to chart if we have one, otherwise entry
         setAppState(chartData ? 'data-render' : 'entry');
-    }, [chartData]);
+    }, [chartData, chat.messages]);
 
     /** Submit a message (works for both typed and voice input) */
     const submitMessage = useCallback(

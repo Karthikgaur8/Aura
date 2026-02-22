@@ -57,6 +57,13 @@ export default function TradeReceipt({ receipt }: TradeReceiptProps) {
             {/* Divider */}
             <div className="w-full h-px mb-4" style={{ background: 'rgba(255,255,255,0.08)' }} />
 
+            {/* Error Message */}
+            {receipt.error && (
+                <div className="mb-4 bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-sm text-red-400 font-medium">
+                    ⚠️ {receipt.error}
+                </div>
+            )}
+
             {/* Details rows */}
             <div className="flex flex-col gap-3">
                 <Row label="Shares" value={receipt.qty.toString()} />

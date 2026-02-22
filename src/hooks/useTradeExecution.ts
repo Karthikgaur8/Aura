@@ -16,6 +16,8 @@ export function useTradeExecution() {
         setIsExecuting(true);
         setResult(null);
 
+        console.log('[useTradeExecution] Sending order:', JSON.stringify(order, null, 2));
+
         try {
             const response = await fetch('/api/trade', {
                 method: 'POST',
@@ -23,7 +25,9 @@ export function useTradeExecution() {
                 body: JSON.stringify(order),
             });
 
+            console.log('[useTradeExecution] Response status:', response.status);
             const data: TradeResult = await response.json();
+            console.log('[useTradeExecution] Response data:', JSON.stringify(data, null, 2));
             setResult(data);
             return data;
         } catch (error) {

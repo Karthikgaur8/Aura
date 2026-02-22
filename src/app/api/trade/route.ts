@@ -10,6 +10,9 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
 export async function POST(req: Request) {
     try {
         const body = await req.json();
+        console.log('[Trade API POST] Received body from frontend:', JSON.stringify(body));
+        console.log('[Trade API POST] Forwarding to:', `${BACKEND_URL}/api/trade`);
+
         const res = await fetch(`${BACKEND_URL}/api/trade`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -17,6 +20,7 @@ export async function POST(req: Request) {
         });
 
         const data = await res.json();
+        console.log('[Trade API POST] Backend response status:', res.status, 'data:', JSON.stringify(data));
 
         if (!res.ok) {
             return NextResponse.json(

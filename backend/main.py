@@ -53,6 +53,7 @@ async def post_trade(order: TradeOrderRequest):
     Supports market, limit, stop, and stop_limit orders.
     Optional stop_loss creates a bracket (OTO) order.
     """
+    print(f"[POST /api/trade] Received order: ticker={order.ticker}, qty={order.qty}, side={order.side}, type={order.type}, notional={order.notional}")
     try:
         result = submit_order(
             ticker=order.ticker,
@@ -64,12 +65,14 @@ async def post_trade(order: TradeOrderRequest):
             stop_loss=order.stop_loss,
             notional=order.notional,
         )
+        print(f"[POST /api/trade] Result: {result}")
         if not result.get('success'):
             raise HTTPException(status_code=400, detail=result.get('error', 'Order failed'))
         return result
     except HTTPException:
         raise
     except Exception as e:
+        print(f"[POST /api/trade] Exception: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

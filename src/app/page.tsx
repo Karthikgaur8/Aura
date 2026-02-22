@@ -14,16 +14,15 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { LayoutGroup, motion, AnimatePresence } from 'framer-motion';
-import type { InteractionMode, TradeOrder } from '@/types';
+import type { TradeOrder } from '@/types';
 
 // Dev B hooks
 import { useAuraChat } from '@/hooks/useAuraChat';
-import { useVoice } from '@/hooks/useVoice';
 import { useTradeExecution } from '@/hooks/useTradeExecution';
 
 // Components
 import MorphingOrb from '@/components/MorphingOrb';
-import ModeToggle from '@/components/ModeToggle';
+
 import ChatInput from '@/components/ChatInput';
 import StockChart from '@/components/StockChart';
 import TradeReceiptCard from '@/components/TradeReceipt';
@@ -38,11 +37,7 @@ import PortfolioDashboard from '@/components/PortfolioDashboard';
 import AIThinkingChain from '@/components/AIThinkingChain';
 import StatusPill from '@/components/StatusPill';
 
-// ── Wake phrase detection ────────────────────────────────────
-const WAKE_PHRASES = ['hey aura', 'hi aura', 'hello aura'];
-function containsWakePhrase(text: string): boolean {
-  return WAKE_PHRASES.some((p) => text.toLowerCase().trim().includes(p));
-}
+
 
 // ── Page transition variants ─────────────────────────────────
 const pageTransition = {
@@ -57,18 +52,13 @@ const pageTransition = {
 // ══════════════════════════════════════════════════════════════
 export default function Home() {
   // ── Hooks ──
-  const voice = useVoice();
-  const chat = useAuraChat({ onFinish: voice.speak });
+  const chat = useAuraChat();
   const trade = useTradeExecution();
 
   // Screen phases
   const [showIntro, setShowIntro] = useState(true);
-  const [isAwake, setIsAwake] = useState(false);
-  const [wakeListening, setWakeListening] = useState(false);
-  const [wakeTranscript, setWakeTranscript] = useState('');
 
   // UI state
-  const [mode, setMode] = useState<InteractionMode>('voice');
   const [showConfetti, setShowConfetti] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
 
@@ -81,78 +71,7 @@ export default function Home() {
     return () => clearTimeout(t);
   }, []);
 
-  // ── Wake word listener ──
-  useEffect(() => {
-    if (showIntro || isAwake) return;
 
-    let isActiveListener = true;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SpeechAPI = typeof window !== 'undefined'
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-      : null;
-
-    if (!SpeechAPI) return;
-
-    const recognition = new SpeechAPI();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onresult = (event: any) => {
-      if (!isActiveListener) return;
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const segment = event.results[i][0].transcript;
-        setWakeTranscript(segment);
-
-        if (containsWakePhrase(segment)) {
-          isActiveListener = false;
-          setIsAwake(true);
-          recognition.stop();
-          setWakeListening(false);
-          return;
-        }
-      }
-    };
-
-    recognition.onerror = () => {
-      if (!isActiveListener) return;
-      setTimeout(() => { if (isActiveListener) { try { recognition.start(); } catch { /* */ } } }, 1000);
-    };
-
-    recognition.onend = () => {
-      if (!isActiveListener) return;
-      setTimeout(() => { if (isActiveListener) { try { recognition.start(); } catch { /* */ } } }, 500);
-    };
-
-    if (isActiveListener) {
-      try { recognition.start(); setWakeListening(true); } catch { /* */ }
-    }
-
-    return () => {
-      isActiveListener = false;
-      try { recognition.stop(); } catch { /* */ }
-    };
-  }, [showIntro, isAwake]);
-
-  // ── Auto-enter when wake word detected ──
-  const hasAutoEntered = useRef(false);
-  useEffect(() => {
-    if (isAwake && !hasAutoEntered.current) {
-      hasAutoEntered.current = true;
-      // Greet the user and start listening
-      voice.speak('Hey! How can I help you today?');
-      // Start listening after greeting finishes
-      setTimeout(() => {
-        voice.startListening((text) => {
-          setShowThinking(true);
-          chat.submitMessage(text);
-        });
-      }, 2000);
-    }
-  }, [isAwake, voice, chat]);
 
   // ── Watch for appState changes to dismiss thinking ──
   useEffect(() => {
@@ -203,17 +122,6 @@ export default function Home() {
     }
   }, [chat, trade]);
 
-  const handleVoiceTap = useCallback(() => {
-    if (voice.isListening) {
-      voice.stopListening();
-    } else {
-      voice.startListening((text) => {
-        setShowThinking(true);
-        chat.submitMessage(text);
-      });
-    }
-  }, [voice, chat]);
-
   const resetToEntry = useCallback(() => {
     chat.clearChart();
     chat.clearReceipt();
@@ -222,7 +130,7 @@ export default function Home() {
   }, [chat]);
 
   // Determine orb active state
-  const isOrbActive = voice.isListening || voice.isSpeaking || chat.isLoading || showThinking;
+  const isOrbActive = chat.isLoading || showThinking;
 
   // ════════════════════════════════════════════════════════
   //  PHASE 1: CINEMATIC INTRO
@@ -296,75 +204,7 @@ export default function Home() {
     );
   }
 
-  // ════════════════════════════════════════════════════════
-  //  PHASE 2: WAKE SCREEN
-  // ════════════════════════════════════════════════════════
-  if (!isAwake) {
-    return (
-      <div className="relative min-h-screen w-full overflow-hidden flex flex-col items-center justify-center film-grain"
-        style={{ background: '#0a0a0f' }}>
-        <AuroraBackground />
-        <ParticleField />
-        <CursorGlow />
 
-        <motion.div
-          className="relative z-10 flex flex-col items-center gap-8"
-          {...pageTransition}
-        >
-          <div className="animate-breathe">
-            <MorphingOrb isCompact={false} isActive={wakeListening} />
-          </div>
-
-          <motion.h1
-            className="text-6xl font-bold text-gradient-animated"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            Aura
-          </motion.h1>
-
-          <StatusPill
-            text={wakeListening ? 'Listening for wake word…' : 'Initializing microphone…'}
-            icon="🎙️"
-            visible={true}
-          />
-
-          <motion.p
-            className="text-lg"
-            style={{ color: 'rgba(255,255,255,0.35)' }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.6 }}
-          >
-            Say <span className="font-semibold" style={{ color: '#a78bfa' }}>&quot;Hey Aura&quot;</span> to begin
-          </motion.p>
-
-          {wakeTranscript && (
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="text-xs max-w-xs text-center font-mono"
-              style={{ color: 'rgba(255,255,255,0.15)' }}
-            >
-              🎙️ {wakeTranscript}
-            </motion.p>
-          )}
-
-          <motion.button
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 2 }}
-            onClick={() => setIsAwake(true)}
-            className="text-xs px-5 py-2 rounded-full glass magnetic-hover transition-all"
-            style={{ color: 'rgba(255,255,255,0.3)' }}
-          >
-            or tap to enter
-          </motion.button>
-        </motion.div>
-      </div>
-    );
-  }
 
   // ════════════════════════════════════════════════════════
   //  PHASE 3: MAIN APP
@@ -410,32 +250,16 @@ export default function Home() {
                   </motion.span>
 
                   <div className="ml-auto flex items-center gap-4">
-                    {/* Global Voice Transcript Preview */}
-                    {voice.transcript && voice.isListening && (
-                      <motion.p
-                        initial={{ opacity: 0, x: 10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className="text-xs font-mono max-w-[200px] truncate"
-                        style={{ color: 'rgba(255,255,255,0.6)' }}
-                      >
-                        🎙️ {voice.transcript}
-                      </motion.p>
-                    )}
-
                     <StatusPill
                       text={
                         chat.isLoading ? 'Processing…' :
-                          voice.isListening ? 'Listening…' :
-                            voice.isSpeaking ? 'Speaking…' :
-                              appState === 'trade-confirm' ? 'Awaiting confirmation' :
-                                'Ready'
+                          appState === 'trade-confirm' ? 'Awaiting confirmation' :
+                            'Ready'
                       }
                       icon={
                         chat.isLoading ? '🧠' :
-                          voice.isListening ? '🎙️' :
-                            voice.isSpeaking ? '🔊' :
-                              appState === 'trade-confirm' ? '⚠️' :
-                                '✨'
+                          appState === 'trade-confirm' ? '⚠️' :
+                            '✨'
                       }
                       visible={true}
                       variant={appState === 'trade-confirm' ? 'warning' : 'default'}
@@ -470,13 +294,11 @@ export default function Home() {
                   </p>
                 </motion.div>
 
-                {/* Morphing Orb — tap for voice */}
+                {/* Morphing Orb */}
                 <motion.div
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ delay: 0.1, type: 'spring', stiffness: 200 }}
-                  className="cursor-pointer"
-                  onClick={handleVoiceTap}
                 >
                   <MorphingOrb isCompact={false} isActive={isOrbActive} />
                 </motion.div>
@@ -485,32 +307,15 @@ export default function Home() {
                 <StatusPill
                   text={
                     showThinking ? 'Analyzing…' :
-                      voice.isListening ? 'Listening — speak now…' :
-                        voice.isSpeaking ? 'Aura is speaking…' :
-                          chat.isLoading ? 'Thinking…' :
-                            mode === 'voice' ? 'Tap the orb to start talking' :
-                              'Type your question below'
+                      chat.isLoading ? 'Thinking…' :
+                        'Type your question below'
                   }
                   icon={
                     showThinking ? '🧠' :
-                      voice.isListening ? '🎙️' :
-                        voice.isSpeaking ? '🔊' :
-                          mode === 'voice' ? '🎙️' : '💬'
+                      chat.isLoading ? '🧠' : '💬'
                   }
                   visible={true}
                 />
-
-                {/* Voice transcript preview */}
-                {voice.transcript && voice.isListening && (
-                  <motion.p
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-sm font-mono text-center max-w-md"
-                    style={{ color: 'rgba(255,255,255,0.4)' }}
-                  >
-                    🎙️ {voice.transcript}
-                  </motion.p>
-                )}
 
                 {/* AI Thinking Chain */}
                 <AnimatePresence>
@@ -521,7 +326,7 @@ export default function Home() {
 
                 {/* Chat messages + input */}
                 <AnimatePresence>
-                  {mode === 'chat' && !showThinking && (
+                  {!showThinking && (
                     <motion.div
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -650,7 +455,9 @@ export default function Home() {
                   className="fixed inset-0 z-40 flex flex-col items-center justify-center gap-6 px-6"
                 >
                   <TradeReceiptCard receipt={chat.tradeReceipt} />
-                  <SlideToConfirm onConfirm={handleTradeConfirm} isLoading={trade.isExecuting} />
+                  {!chat.tradeReceipt.error && (
+                    <SlideToConfirm onConfirm={handleTradeConfirm} isLoading={trade.isExecuting} />
+                  )}
 
                   {/* Trade result feedback */}
                   {trade.result && !trade.result.success && (
@@ -675,17 +482,7 @@ export default function Home() {
             )}
           </AnimatePresence>
 
-          {/* ── Mode Toggle ── */}
-          {appState === 'entry' && !showThinking && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30"
-            >
-              <ModeToggle mode={mode} onToggle={setMode} />
-            </motion.div>
-          )}
+
 
           {/* Confetti */}
           <ConfettiSuccess show={showConfetti} />

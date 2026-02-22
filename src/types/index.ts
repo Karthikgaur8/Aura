@@ -58,6 +58,7 @@ export interface TradeReceipt {
   estimatedTotal: number;
   currentPrice: number;
   stopLoss?: number;
+  error?: string;
 }
 
 /** Portfolio position */

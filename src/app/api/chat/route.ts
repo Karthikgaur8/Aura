@@ -24,7 +24,7 @@ export async function POST(req: Request) {
                 render_stock_chart: renderStockChartTool,
                 generate_trade_receipt: generateTradeReceiptTool,
             },
-            maxToolRoundtrips: 3,
+            maxToolRoundtrips: 5,
         });
 
         return result.toDataStreamResponse();
