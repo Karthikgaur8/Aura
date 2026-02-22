@@ -128,21 +128,20 @@ def get_stock_quote(ticker: str) -> dict:
         current_price = float(latest_trade.get('p', 0))
         prev_close = float(prev_daily_bar.get('c', 0))
     else:
-        # Stock snapshot
+        # Stock snapshot using bars/latest to avoid 403 on free tiers
         resp = requests.get(
-            f"{STOCK_DATA_URL}/{symbol}/snapshot",
+            f"{STOCK_DATA_URL}/bars/latest",
             headers=HEADERS,
-            params={'feed': 'iex'},
+            params={'symbols': symbol, 'feed': 'iex'},
         )
         resp.raise_for_status()
-        snapshot = resp.json()
-
-        latest_trade = snapshot.get('latestTrade', {})
-        daily_bar = snapshot.get('dailyBar', {})
-        prev_daily_bar = snapshot.get('prevDailyBar', {})
-
-        current_price = float(latest_trade.get('p', 0))
-        prev_close = float(prev_daily_bar.get('c', 0))
+        data = resp.json()
+        
+        # Get the latest bar
+        bar = data.get('bars', {}).get(symbol, {})
+        current_price = float(bar.get('c', 0))
+        # Since we don't have prev_close in the latest bar endpoint, we can use open for today's change
+        prev_close = float(bar.get('o', 0)) if current_price else 0
 
     change = current_price - prev_close if prev_close else 0
     change_percent = (change / prev_close * 100) if prev_close else 0
@@ -152,7 +151,7 @@ def get_stock_quote(ticker: str) -> dict:
         'price': current_price,
         'change': round(change, 2),
         'changePercent': round(change_percent, 2),
-        'volume': int(daily_bar.get('v', 0)),
+        'volume': int(bar.get('v', 0)) if not crypto else int(daily_bar.get('v', 0)),
         'asOf': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         'source': 'alpaca'
     }

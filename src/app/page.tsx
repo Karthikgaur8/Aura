@@ -85,6 +85,8 @@ export default function Home() {
   useEffect(() => {
     if (showIntro || isAwake) return;
 
+    let isActiveListener = true;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SpeechAPI = typeof window !== 'undefined'
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -100,11 +102,13 @@ export default function Home() {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     recognition.onresult = (event: any) => {
+      if (!isActiveListener) return;
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const segment = event.results[i][0].transcript;
         setWakeTranscript(segment);
 
         if (containsWakePhrase(segment)) {
+          isActiveListener = false;
           setIsAwake(true);
           recognition.stop();
           setWakeListening(false);
@@ -114,18 +118,23 @@ export default function Home() {
     };
 
     recognition.onerror = () => {
-      setTimeout(() => { try { recognition.start(); } catch { /* */ } }, 1000);
+      if (!isActiveListener) return;
+      setTimeout(() => { if (isActiveListener) { try { recognition.start(); } catch { /* */ } } }, 1000);
     };
 
     recognition.onend = () => {
-      if (!isAwake) {
-        setTimeout(() => { try { recognition.start(); } catch { /* */ } }, 500);
-      }
+      if (!isActiveListener) return;
+      setTimeout(() => { if (isActiveListener) { try { recognition.start(); } catch { /* */ } } }, 500);
     };
 
-    try { recognition.start(); setWakeListening(true); } catch { /* */ }
+    if (isActiveListener) {
+      try { recognition.start(); setWakeListening(true); } catch { /* */ }
+    }
 
-    return () => { try { recognition.stop(); } catch { /* */ } };
+    return () => {
+      isActiveListener = false;
+      try { recognition.stop(); } catch { /* */ }
+    };
   }, [showIntro, isAwake]);
 
   // ── Auto-enter when wake word detected ──
@@ -133,11 +142,17 @@ export default function Home() {
   useEffect(() => {
     if (isAwake && !hasAutoEntered.current) {
       hasAutoEntered.current = true;
-      // Send initial query through the real chat
-      chat.submitMessage('Hey Aura, show me the markets');
-      setShowThinking(true);
+      // Greet the user and start listening
+      voice.speak('Hey! How can I help you today?');
+      // Start listening after greeting finishes
+      setTimeout(() => {
+        voice.startListening((text) => {
+          setShowThinking(true);
+          chat.submitMessage(text);
+        });
+      }, 2000);
     }
-  }, [isAwake, chat]);
+  }, [isAwake, voice, chat]);
 
   // ── Watch for appState changes to dismiss thinking ──
   useEffect(() => {
@@ -394,7 +409,19 @@ export default function Home() {
                     Aura
                   </motion.span>
 
-                  <div className="ml-auto">
+                  <div className="ml-auto flex items-center gap-4">
+                    {/* Global Voice Transcript Preview */}
+                    {voice.transcript && voice.isListening && (
+                      <motion.p
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="text-xs font-mono max-w-[200px] truncate"
+                        style={{ color: 'rgba(255,255,255,0.6)' }}
+                      >
+                        🎙️ {voice.transcript}
+                      </motion.p>
+                    )}
+
                     <StatusPill
                       text={
                         chat.isLoading ? 'Processing…' :

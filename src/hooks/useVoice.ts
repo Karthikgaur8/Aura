@@ -92,6 +92,9 @@ export function useVoice() {
             // When we have a final result, trigger the callback
             if (finalTranscript) {
                 onResultRef.current?.(finalTranscript.trim());
+                // Auto-stop after getting a complete phrase
+                try { recognition.stop(); } catch { /* */ }
+                setIsListening(false);
             }
         };
 
@@ -111,7 +114,6 @@ export function useVoice() {
             } else if (event.error === 'network') {
                 alert('Network error occurred during speech recognition. Please check your connection.');
             }
-            // Don't clear transcript on error — user might want to see what was captured
         };
 
         recognition.onend = () => {
