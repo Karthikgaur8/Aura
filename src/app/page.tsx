@@ -1,317 +1,642 @@
 // ============================================================
 // page.tsx — Dev A
-// Main page with 3 visual states:
-//   1. Entry: centered orb + mode toggle
-//   2. Data Render: orb shrinks to top-left, chart appears
-//   3. Trade Confirm: dim backdrop, receipt slides up, slide-to-confirm
+// Main page — Integrated with Dev B hooks:
+//   useAuraChat (Vercel AI SDK → /api/chat → OpenAI → tools)
+//   useVoice (Web Speech STT + ElevenLabs/browser TTS)
+//   useTradeExecution (POST /api/trade → Alpaca)
+//
+// Flow:
+//   1. Cinematic intro → Wake screen → Main app
+//   2. appState managed automatically by useAuraChat via tool calls
+//   3. Voice + Chat both send text through chat.submitMessage()
 // ============================================================
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { LayoutGroup, motion, AnimatePresence } from 'framer-motion';
-import type { InteractionMode, AppState, StockBar, TradeReceipt as TradeReceiptType } from '@/types';
+import type { InteractionMode, TradeOrder } from '@/types';
+
+// Dev B hooks
+import { useAuraChat } from '@/hooks/useAuraChat';
+import { useVoice } from '@/hooks/useVoice';
+import { useTradeExecution } from '@/hooks/useTradeExecution';
 
 // Components
-import VoiceOrb from '@/components/VoiceOrb';
+import MorphingOrb from '@/components/MorphingOrb';
 import ModeToggle from '@/components/ModeToggle';
 import ChatInput from '@/components/ChatInput';
 import StockChart from '@/components/StockChart';
 import TradeReceiptCard from '@/components/TradeReceipt';
 import SlideToConfirm from '@/components/SlideToConfirm';
 import ConfettiSuccess from '@/components/ConfettiSuccess';
+import ParticleField from '@/components/ParticleField';
+import CursorGlow from '@/components/CursorGlow';
+import AuroraBackground from '@/components/AuroraBackground';
+import ChatMessages, { type ChatMessage } from '@/components/ChatMessages';
+import TickerTape from '@/components/TickerTape';
+import PortfolioDashboard from '@/components/PortfolioDashboard';
+import AIThinkingChain from '@/components/AIThinkingChain';
+import StatusPill from '@/components/StatusPill';
 
-// Dev B hooks (stubbed — will be wired when Dev B finishes)
-// import { useAuraChat } from '@/hooks/useAuraChat';
-// import { useVoice } from '@/hooks/useVoice';
-// import { useTradeExecution } from '@/hooks/useTradeExecution';
-
-// ── Mock data for standalone demo ─────────────────────────────
-const MOCK_STOCK_DATA: StockBar[] = generateMockOHLCV('2025-01-02', 60);
-
-const MOCK_RECEIPT: TradeReceiptType = {
-  ticker: 'AAPL',
-  qty: 10,
-  side: 'buy',
-  orderType: 'market',
-  estimatedTotal: 2342.50,
-  currentPrice: 234.25,
-};
-
-function generateMockOHLCV(startDate: string, count: number): StockBar[] {
-  const bars: StockBar[] = [];
-  let price = 230;
-  const start = new Date(startDate);
-
-  for (let i = 0; i < count; i++) {
-    const date = new Date(start);
-    date.setDate(start.getDate() + i);
-    // Skip weekends
-    if (date.getDay() === 0 || date.getDay() === 6) continue;
-
-    const change = (Math.random() - 0.48) * 6;
-    const open = price;
-    const close = price + change;
-    const high = Math.max(open, close) + Math.random() * 3;
-    const low = Math.min(open, close) - Math.random() * 3;
-    const volume = Math.floor(Math.random() * 50000000) + 10000000;
-
-    bars.push({
-      timestamp: date.toISOString().split('T')[0],
-      open: +open.toFixed(2),
-      high: +high.toFixed(2),
-      low: +low.toFixed(2),
-      close: +close.toFixed(2),
-      volume,
-    });
-
-    price = close;
-  }
-  return bars;
+// ── Wake phrase detection ────────────────────────────────────
+const WAKE_PHRASES = ['hey aura', 'hi aura', 'hello aura'];
+function containsWakePhrase(text: string): boolean {
+  return WAKE_PHRASES.some((p) => text.toLowerCase().trim().includes(p));
 }
 
-// ── Main Page ─────────────────────────────────────────────────
+// ── Page transition variants ─────────────────────────────────
+const pageTransition = {
+  initial: { opacity: 0, y: 20, filter: 'blur(8px)' },
+  animate: { opacity: 1, y: 0, filter: 'blur(0px)' },
+  exit: { opacity: 0, y: -20, filter: 'blur(8px)' },
+  transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as const },
+};
+
+// ══════════════════════════════════════════════════════════════
+//  MAIN PAGE
+// ══════════════════════════════════════════════════════════════
 export default function Home() {
+  // ── Hooks ──
+  const voice = useVoice();
+  const chat = useAuraChat({ onFinish: voice.speak });
+  const trade = useTradeExecution();
+
+  // Screen phases
+  const [showIntro, setShowIntro] = useState(true);
+  const [isAwake, setIsAwake] = useState(false);
+  const [wakeListening, setWakeListening] = useState(false);
+  const [wakeTranscript, setWakeTranscript] = useState('');
+
+  // UI state
   const [mode, setMode] = useState<InteractionMode>('voice');
-  const [appState, setAppState] = useState<AppState>('entry');
-  const [chatInput, setChatInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
-  const [isTradeExecuting, setIsTradeExecuting] = useState(false);
+  const [showThinking, setShowThinking] = useState(false);
+
+  // appState comes from chat hook (auto-managed by tool invocations)
+  const appState = chat.appState;
+
+  // ── Cinematic intro timer ──
+  useEffect(() => {
+    const t = setTimeout(() => setShowIntro(false), 3800);
+    return () => clearTimeout(t);
+  }, []);
+
+  // ── Wake word listener ──
+  useEffect(() => {
+    if (showIntro || isAwake) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SpeechAPI = typeof window !== 'undefined'
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      : null;
+
+    if (!SpeechAPI) return;
+
+    const recognition = new SpeechAPI();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (event: any) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const segment = event.results[i][0].transcript;
+        setWakeTranscript(segment);
+
+        if (containsWakePhrase(segment)) {
+          setIsAwake(true);
+          recognition.stop();
+          setWakeListening(false);
+          return;
+        }
+      }
+    };
+
+    recognition.onerror = () => {
+      setTimeout(() => { try { recognition.start(); } catch { /* */ } }, 1000);
+    };
+
+    recognition.onend = () => {
+      if (!isAwake) {
+        setTimeout(() => { try { recognition.start(); } catch { /* */ } }, 500);
+      }
+    };
+
+    try { recognition.start(); setWakeListening(true); } catch { /* */ }
+
+    return () => { try { recognition.stop(); } catch { /* */ } };
+  }, [showIntro, isAwake]);
+
+  // ── Auto-enter when wake word detected ──
+  const hasAutoEntered = useRef(false);
+  useEffect(() => {
+    if (isAwake && !hasAutoEntered.current) {
+      hasAutoEntered.current = true;
+      // Send initial query through the real chat
+      chat.submitMessage('Hey Aura, show me the markets');
+      setShowThinking(true);
+    }
+  }, [isAwake, chat]);
+
+  // ── Watch for appState changes to dismiss thinking ──
+  useEffect(() => {
+    if (appState !== 'entry') {
+      setShowThinking(false);
+    }
+  }, [appState]);
+
+  // ── Also dismiss thinking when loading finishes ──
+  useEffect(() => {
+    if (!chat.isLoading && showThinking) {
+      // Small delay to let animations complete
+      const t = setTimeout(() => setShowThinking(false), 500);
+      return () => clearTimeout(t);
+    }
+  }, [chat.isLoading, showThinking]);
+
+  // ── Adapt messages for ChatMessages component ──
+  const adaptedMessages: ChatMessage[] = chat.messages
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .filter((m) => m.content) // filter out empty tool-only messages
+    .map((m) => ({
+      id: m.id,
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }));
 
   // ── Handlers ──
   const handleChatSubmit = useCallback(() => {
-    if (!chatInput.trim()) return;
-    setIsLoading(true);
-    // Simulate AI response → transition to data-render
-    setTimeout(() => {
-      setIsLoading(false);
-      setAppState('data-render');
-      setChatInput('');
-    }, 1200);
-  }, [chatInput]);
+    setShowThinking(true);
+    chat.handleSubmit(new Event('submit') as unknown as React.FormEvent);
+  }, [chat]);
 
-  const handleTradeConfirm = useCallback(() => {
-    setIsTradeExecuting(true);
-    setTimeout(() => {
-      setIsTradeExecuting(false);
+  const handleTradeConfirm = useCallback(async () => {
+    if (!chat.tradeReceipt) return;
+    const order: TradeOrder = {
+      ticker: chat.tradeReceipt.ticker,
+      qty: chat.tradeReceipt.qty,
+      side: chat.tradeReceipt.side,
+      type: chat.tradeReceipt.orderType as TradeOrder['type'],
+    };
+    const result = await trade.executeTrade(order);
+    if (result.success) {
+      chat.clearReceipt();
       setShowConfetti(true);
-      // Auto-dismiss confetti
-      setTimeout(() => {
-        setShowConfetti(false);
-        setAppState('entry');
-      }, 3000);
-    }, 1500);
-  }, []);
-
-  const handleOrbClick = useCallback(() => {
-    if (mode === 'voice' && appState === 'entry') {
-      // Simulate voice activation → data render
-      setIsLoading(true);
-      setTimeout(() => {
-        setIsLoading(false);
-        setAppState('data-render');
-      }, 1500);
+      setTimeout(() => setShowConfetti(false), 3000);
     }
-  }, [mode, appState]);
+  }, [chat, trade]);
 
+  const handleVoiceTap = useCallback(() => {
+    if (voice.isListening) {
+      voice.stopListening();
+    } else {
+      voice.startListening((text) => {
+        setShowThinking(true);
+        chat.submitMessage(text);
+      });
+    }
+  }, [voice, chat]);
+
+  const resetToEntry = useCallback(() => {
+    chat.clearChart();
+    chat.clearReceipt();
+    setShowConfetti(false);
+    setShowThinking(false);
+  }, [chat]);
+
+  // Determine orb active state
+  const isOrbActive = voice.isListening || voice.isSpeaking || chat.isLoading || showThinking;
+
+  // ════════════════════════════════════════════════════════
+  //  PHASE 1: CINEMATIC INTRO
+  // ════════════════════════════════════════════════════════
+  if (showIntro) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center film-grain"
+        style={{ background: '#0a0a0f' }}>
+        <motion.div className="flex flex-col items-center gap-6">
+          <motion.div
+            className="relative"
+            initial={{ scale: 0, opacity: 0, rotate: -180 }}
+            animate={{ scale: 1, opacity: 1, rotate: 0 }}
+            transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <motion.div
+              className="absolute -inset-16"
+              style={{
+                background: 'radial-gradient(circle, rgba(139,92,246,0.2) 0%, rgba(34,197,94,0.05) 50%, transparent 70%)',
+                filter: 'blur(40px)',
+              }}
+              animate={{ scale: [1, 1.3, 1], opacity: [0.5, 0.8, 0.5] }}
+              transition={{ duration: 2, repeat: Infinity }}
+            />
+            <MorphingOrb isCompact={false} isActive={true} />
+          </motion.div>
+
+          <motion.div
+            className="overflow-hidden"
+            initial={{ width: 0 }}
+            animate={{ width: 'auto' }}
+            transition={{ delay: 0.8, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <motion.h1
+              className="text-7xl font-bold text-gradient-animated whitespace-nowrap"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.9, duration: 0.4 }}
+            >
+              Aura
+            </motion.h1>
+          </motion.div>
+
+          <motion.p
+            className="text-lg tracking-[0.3em] uppercase"
+            style={{ color: 'rgba(255,255,255,0.25)' }}
+            initial={{ opacity: 0, y: 15, filter: 'blur(4px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            transition={{ delay: 1.6, duration: 0.6 }}
+          >
+            Talk · See · Trade
+          </motion.p>
+
+          <motion.div
+            className="h-px rounded"
+            style={{ background: 'linear-gradient(90deg, transparent, rgba(139,92,246,0.5), transparent)' }}
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: '200px', opacity: 1 }}
+            transition={{ delay: 2.0, duration: 0.8 }}
+          />
+
+          <motion.div
+            className="fixed inset-0 pointer-events-none"
+            style={{ background: '#0a0a0f' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 3.0, duration: 0.8 }}
+          />
+        </motion.div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════
+  //  PHASE 2: WAKE SCREEN
+  // ════════════════════════════════════════════════════════
+  if (!isAwake) {
+    return (
+      <div className="relative min-h-screen w-full overflow-hidden flex flex-col items-center justify-center film-grain"
+        style={{ background: '#0a0a0f' }}>
+        <AuroraBackground />
+        <ParticleField />
+        <CursorGlow />
+
+        <motion.div
+          className="relative z-10 flex flex-col items-center gap-8"
+          {...pageTransition}
+        >
+          <div className="animate-breathe">
+            <MorphingOrb isCompact={false} isActive={wakeListening} />
+          </div>
+
+          <motion.h1
+            className="text-6xl font-bold text-gradient-animated"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            Aura
+          </motion.h1>
+
+          <StatusPill
+            text={wakeListening ? 'Listening for wake word…' : 'Initializing microphone…'}
+            icon="🎙️"
+            visible={true}
+          />
+
+          <motion.p
+            className="text-lg"
+            style={{ color: 'rgba(255,255,255,0.35)' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+          >
+            Say <span className="font-semibold" style={{ color: '#a78bfa' }}>&quot;Hey Aura&quot;</span> to begin
+          </motion.p>
+
+          {wakeTranscript && (
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-xs max-w-xs text-center font-mono"
+              style={{ color: 'rgba(255,255,255,0.15)' }}
+            >
+              🎙️ {wakeTranscript}
+            </motion.p>
+          )}
+
+          <motion.button
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 2 }}
+            onClick={() => setIsAwake(true)}
+            className="text-xs px-5 py-2 rounded-full glass magnetic-hover transition-all"
+            style={{ color: 'rgba(255,255,255,0.3)' }}
+          >
+            or tap to enter
+          </motion.button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════
+  //  PHASE 3: MAIN APP
+  // ════════════════════════════════════════════════════════
   return (
     <LayoutGroup>
-      <div className="relative min-h-screen w-full overflow-hidden"
+      <div className="relative min-h-screen w-full overflow-hidden film-grain"
         style={{ background: '#0a0a0f' }}>
 
-        {/* ── Background ambient glow ── */}
-        <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 0 }}>
-          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full"
-            style={{
-              background: 'radial-gradient(circle, rgba(139,92,246,0.08) 0%, transparent 70%)',
-              filter: 'blur(80px)',
-            }} />
-          <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] rounded-full"
-            style={{
-              background: 'radial-gradient(circle, rgba(34,197,94,0.05) 0%, transparent 70%)',
-              filter: 'blur(60px)',
-            }} />
+        {/* Background layers */}
+        <AuroraBackground />
+        <ParticleField />
+        <CursorGlow />
+
+        {/* ── Ticker Tape (top) ── */}
+        <div className="fixed top-0 left-0 right-0 z-50">
+          <TickerTape />
         </div>
 
-        {/* ── Content Layer ── */}
-        <div className="relative z-10 min-h-screen flex flex-col">
+        {/* ── Content ── */}
+        <div className="relative z-10 min-h-screen flex flex-col pt-8">
 
-          {/* ── Top bar (compact orb lives here in data-render/trade-confirm) ── */}
+          {/* ── Top header bar ── */}
           <AnimatePresence>
             {appState !== 'entry' && (
               <motion.header
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed top-0 left-0 right-0 z-40 flex items-center gap-4 px-6 py-4"
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="fixed top-8 left-0 right-0 z-40 px-6 py-3"
+                style={{ background: 'linear-gradient(to bottom, rgba(10,10,15,0.95) 0%, transparent 100%)' }}
               >
-                <div
-                  className="cursor-pointer"
-                  onClick={() => setAppState('entry')}
-                  title="Back to home"
-                >
-                  <VoiceOrb isCompact isActive={isLoading} />
+                <div className="flex items-center gap-3">
+                  <div className="cursor-pointer" onClick={resetToEntry} title="Back to home">
+                    <MorphingOrb isCompact isActive={isOrbActive} />
+                  </div>
+                  <motion.span
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="text-sm font-bold text-gradient-animated"
+                  >
+                    Aura
+                  </motion.span>
+
+                  <div className="ml-auto">
+                    <StatusPill
+                      text={
+                        chat.isLoading ? 'Processing…' :
+                          voice.isListening ? 'Listening…' :
+                            voice.isSpeaking ? 'Speaking…' :
+                              appState === 'trade-confirm' ? 'Awaiting confirmation' :
+                                'Ready'
+                      }
+                      icon={
+                        chat.isLoading ? '🧠' :
+                          voice.isListening ? '🎙️' :
+                            voice.isSpeaking ? '🔊' :
+                              appState === 'trade-confirm' ? '⚠️' :
+                                '✨'
+                      }
+                      visible={true}
+                      variant={appState === 'trade-confirm' ? 'warning' : 'default'}
+                    />
+                  </div>
                 </div>
-                <motion.span
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className="text-sm font-semibold text-white text-glow-purple"
-                >
-                  Aura
-                </motion.span>
               </motion.header>
             )}
           </AnimatePresence>
 
-          {/* ══════════════════════════════════════════════════
-                        STATE 1: ENTRY — centered orb + toggle
-                       ══════════════════════════════════════════════════ */}
-          {appState === 'entry' && (
-            <div className="flex-1 flex flex-col items-center justify-center gap-8 px-6">
-              {/* Brand */}
+          {/* ═══════════════════════════════════════════
+              STATE 1: ENTRY
+             ═══════════════════════════════════════════ */}
+          <AnimatePresence mode="wait">
+            {appState === 'entry' && (
               <motion.div
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 }}
-                className="text-center mb-4"
+                key="entry"
+                className="flex-1 flex flex-col items-center justify-center gap-5 px-6"
+                {...pageTransition}
               >
-                <h1 className="text-4xl font-bold text-white text-glow-purple mb-2">
-                  Aura
-                </h1>
-                <p className="text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                  Talk. See. Trade.
-                </p>
-              </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-center mb-2"
+                >
+                  <h1 className="text-5xl font-bold text-gradient-animated mb-2">
+                    Aura
+                  </h1>
+                  <p className="text-sm tracking-widest uppercase"
+                    style={{ color: 'rgba(255,255,255,0.3)' }}>
+                    Talk · See · Trade
+                  </p>
+                </motion.div>
 
-              {/* Center orb */}
+                {/* Morphing Orb — tap for voice */}
+                <motion.div
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: 0.1, type: 'spring', stiffness: 200 }}
+                  className="cursor-pointer"
+                  onClick={handleVoiceTap}
+                >
+                  <MorphingOrb isCompact={false} isActive={isOrbActive} />
+                </motion.div>
+
+                {/* Status pill */}
+                <StatusPill
+                  text={
+                    showThinking ? 'Analyzing…' :
+                      voice.isListening ? 'Listening — speak now…' :
+                        voice.isSpeaking ? 'Aura is speaking…' :
+                          chat.isLoading ? 'Thinking…' :
+                            mode === 'voice' ? 'Tap the orb to start talking' :
+                              'Type your question below'
+                  }
+                  icon={
+                    showThinking ? '🧠' :
+                      voice.isListening ? '🎙️' :
+                        voice.isSpeaking ? '🔊' :
+                          mode === 'voice' ? '🎙️' : '💬'
+                  }
+                  visible={true}
+                />
+
+                {/* Voice transcript preview */}
+                {voice.transcript && voice.isListening && (
+                  <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-sm font-mono text-center max-w-md"
+                    style={{ color: 'rgba(255,255,255,0.4)' }}
+                  >
+                    🎙️ {voice.transcript}
+                  </motion.p>
+                )}
+
+                {/* AI Thinking Chain */}
+                <AnimatePresence>
+                  {showThinking && (
+                    <AIThinkingChain isActive={showThinking} onComplete={() => { }} />
+                  )}
+                </AnimatePresence>
+
+                {/* Chat messages + input */}
+                <AnimatePresence>
+                  {mode === 'chat' && !showThinking && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 20 }}
+                      className="w-full max-w-xl flex flex-col gap-3"
+                    >
+                      <ChatMessages messages={adaptedMessages} isLoading={chat.isLoading} />
+                      <ChatInput
+                        value={chat.input}
+                        onChange={(val) => chat.setInput(val)}
+                        onSubmit={handleChatSubmit}
+                        isLoading={chat.isLoading}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Error display */}
+                {chat.error && (
+                  <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-xs text-red-400 max-w-md text-center"
+                  >
+                    ⚠️ {chat.error.message}
+                  </motion.p>
+                )}
+              </motion.div>
+            )}
+
+            {/* ═══════════════════════════════════════════
+                STATE 2: DATA RENDER
+               ═══════════════════════════════════════════ */}
+            {appState === 'data-render' && (
               <motion.div
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
-                className="cursor-pointer"
-                onClick={handleOrbClick}
+                key="data-render"
+                className="flex-1 flex flex-col items-center justify-center px-6 py-20"
+                {...pageTransition}
               >
-                <VoiceOrb isCompact={false} isActive={isLoading} />
-              </motion.div>
+                <div className="w-full max-w-4xl flex flex-col gap-5">
+                  {/* Portfolio dashboard */}
+                  <PortfolioDashboard />
 
-              {/* Instruction text */}
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.5 }}
-                className="text-sm animate-float"
-                style={{ color: 'rgba(255,255,255,0.3)' }}
-              >
-                {mode === 'voice'
-                  ? 'Tap the orb to start talking'
-                  : 'Type your question below'}
-              </motion.p>
+                  {/* Chat messages */}
+                  {adaptedMessages.length > 0 && (
+                    <ChatMessages messages={adaptedMessages} isLoading={chat.isLoading} />
+                  )}
 
-              {/* Chat input (chat mode only) */}
-              <AnimatePresence>
-                {mode === 'chat' && (
+                  {/* Chart — from real API data */}
+                  {chat.chartData && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.2, duration: 0.5 }}
+                    >
+                      <StockChart
+                        ticker={chat.chartData.ticker}
+                        data={chat.chartData.bars}
+                        period={chat.chartData.period}
+                      />
+                    </motion.div>
+                  )}
+
+                  {/* Actions */}
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 20 }}
-                    className="w-full max-w-xl"
+                    transition={{ delay: 0.4 }}
+                    className="flex flex-col sm:flex-row items-center gap-3 justify-center"
                   >
-                    <ChatInput
-                      value={chatInput}
-                      onChange={setChatInput}
-                      onSubmit={handleChatSubmit}
-                      isLoading={isLoading}
-                    />
+                    <button
+                      onClick={() => {
+                        setShowThinking(true);
+                        chat.submitMessage(`Buy 5 shares of ${chat.chartData?.ticker || 'AAPL'}`);
+                      }}
+                      className="px-6 py-3 rounded-xl text-sm font-medium text-white magnetic-hover"
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(34,197,94,0.2), rgba(34,197,94,0.1))',
+                        border: '1px solid rgba(34,197,94,0.3)',
+                        boxShadow: '0 0 20px rgba(34,197,94,0.15)',
+                      }}
+                    >
+                      📈 Execute Trade
+                    </button>
+                    <button
+                      onClick={resetToEntry}
+                      className="px-6 py-3 rounded-xl text-sm font-medium glass magnetic-hover"
+                      style={{ color: 'rgba(255,255,255,0.6)' }}
+                    >
+                      ← Back
+                    </button>
                   </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )}
 
-          {/* ══════════════════════════════════════════════════
-                        STATE 2: DATA RENDER — chart display
-                       ══════════════════════════════════════════════════ */}
-          {appState === 'data-render' && (
-            <div className="flex-1 flex flex-col pt-24 px-6 pb-6">
-              <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col gap-6">
-                {/* Chart */}
-                <StockChart
-                  ticker="AAPL"
-                  data={MOCK_STOCK_DATA}
-                  period="3M"
-                />
-
-                {/* Action area */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.4 }}
-                  className="flex flex-col sm:flex-row items-center gap-3 justify-center"
-                >
-                  <button
-                    onClick={() => setAppState('trade-confirm')}
-                    className="px-6 py-3 rounded-xl text-sm font-medium text-white transition-all hover:scale-105"
-                    style={{
-                      background: 'linear-gradient(135deg, rgba(34,197,94,0.2), rgba(34,197,94,0.1))',
-                      border: '1px solid rgba(34,197,94,0.3)',
-                      boxShadow: '0 0 20px rgba(34,197,94,0.15)',
-                    }}
-                  >
-                    📈 Execute Trade
-                  </button>
-                  <button
-                    onClick={() => setAppState('entry')}
-                    className="px-6 py-3 rounded-xl text-sm font-medium transition-all hover:scale-105 glass"
-                    style={{ color: 'rgba(255,255,255,0.6)' }}
-                  >
-                    ← Back
-                  </button>
-                </motion.div>
-
-                {/* Chat input at bottom */}
-                {mode === 'chat' && (
-                  <div className="mt-auto pt-4">
+                  {/* Chat input */}
+                  <div className="mt-2">
                     <ChatInput
-                      value={chatInput}
-                      onChange={setChatInput}
+                      value={chat.input}
+                      onChange={(val) => chat.setInput(val)}
                       onSubmit={handleChatSubmit}
-                      isLoading={isLoading}
+                      isLoading={chat.isLoading}
                     />
                   </div>
-                )}
-              </div>
-            </div>
-          )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          {/* ══════════════════════════════════════════════════
-                        STATE 3: TRADE CONFIRM — dim + receipt + slider
-                       ══════════════════════════════════════════════════ */}
+          {/* ═══════════════════════════════════════════
+              STATE 3: TRADE CONFIRM
+             ═══════════════════════════════════════════ */}
           <AnimatePresence>
-            {appState === 'trade-confirm' && (
+            {appState === 'trade-confirm' && chat.tradeReceipt && (
               <>
-                {/* Dim backdrop */}
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   className="fixed inset-0 z-30 backdrop-dim"
-                  onClick={() => setAppState('data-render')}
+                  onClick={() => chat.clearReceipt()}
                 />
-
-                {/* Receipt + Slider */}
                 <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
+                  initial={{ opacity: 0, scale: 0.9, filter: 'blur(8px)' }}
+                  animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+                  exit={{ opacity: 0, scale: 0.9, filter: 'blur(8px)' }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 25 }}
                   className="fixed inset-0 z-40 flex flex-col items-center justify-center gap-6 px-6"
                 >
-                  <TradeReceiptCard receipt={MOCK_RECEIPT} />
-                  <SlideToConfirm
-                    onConfirm={handleTradeConfirm}
-                    isLoading={isTradeExecuting}
-                  />
+                  <TradeReceiptCard receipt={chat.tradeReceipt} />
+                  <SlideToConfirm onConfirm={handleTradeConfirm} isLoading={trade.isExecuting} />
+
+                  {/* Trade result feedback */}
+                  {trade.result && !trade.result.success && (
+                    <motion.p
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="text-xs text-red-400"
+                    >
+                      ⚠️ {trade.result.error || 'Trade failed'}
+                    </motion.p>
+                  )}
+
                   <button
-                    onClick={() => setAppState('data-render')}
+                    onClick={() => chat.clearReceipt()}
                     className="text-sm transition-colors hover:text-white"
                     style={{ color: 'rgba(255,255,255,0.4)' }}
                   >
@@ -322,46 +647,48 @@ export default function Home() {
             )}
           </AnimatePresence>
 
-          {/* ── Mode Toggle (fixed bottom) ── */}
-          {appState === 'entry' && (
+          {/* ── Mode Toggle ── */}
+          {appState === 'entry' && !showThinking && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
+              transition={{ delay: 0.3 }}
               className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30"
             >
               <ModeToggle mode={mode} onToggle={setMode} />
             </motion.div>
           )}
 
-          {/* ── Confetti ── */}
+          {/* Confetti */}
           <ConfettiSuccess show={showConfetti} />
 
-          {/* ── Demo controls (for standalone testing) ── */}
+          {/* ── Demo controls ── */}
           <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-            {appState === 'entry' && (
+            {appState === 'entry' && !showThinking && (
               <button
-                onClick={() => setAppState('data-render')}
-                className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-400 hover:text-white transition-colors"
+                onClick={() => {
+                  setShowThinking(true);
+                  chat.submitMessage("How's Apple doing?");
+                }}
+                className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-500 hover:text-white transition-colors"
               >
-                Demo: Chart →
+                Demo: AAPL →
               </button>
             )}
             {appState === 'data-render' && (
               <button
-                onClick={() => setAppState('trade-confirm')}
-                className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-400 hover:text-white transition-colors"
+                onClick={() => {
+                  chat.submitMessage(`Buy 5 shares of ${chat.chartData?.ticker || 'AAPL'}`);
+                }}
+                className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-500 hover:text-white transition-colors"
               >
                 Demo: Trade →
               </button>
             )}
-            {appState !== 'entry' && (
+            {(appState !== 'entry' || showThinking) && (
               <button
-                onClick={() => {
-                  setAppState('entry');
-                  setShowConfetti(false);
-                }}
-                className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-400 hover:text-white transition-colors"
+                onClick={resetToEntry}
+                className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-500 hover:text-white transition-colors"
               >
                 ← Reset
               </button>
