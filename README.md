@@ -36,15 +36,22 @@ venv\Scripts\pip install -r backend\requirements.txt
 cp .env.example .env.local
 # Fill in your API keys (see table below)
 
-# 4. Start Python backend (Terminal 1)
-cd backend
-..\venv\Scripts\python -m uvicorn main:app --port 8000
+# 4. Start the Application (Requires 2 Terminals)
 
-# 5. Start Next.js frontend (Terminal 2)
+**Terminal 1 (Python Backend):**
+```bash
+cd backend
+..\venv\Scripts\python.exe -m uvicorn main:app --reload
+```
+*(Leave this terminal running in the background!)*
+
+**Terminal 2 (Next.js Frontend):**
+Open a **new** terminal in the root `Aura` directory:
+```bash
 npm run dev
-# Open http://localhost:3000
 ```
 
+Then, open your browser to **http://localhost:3000**
 ## 🔑 Environment Variables
 
 | Variable | Description | Required |
