@@ -1,30 +1,31 @@
 // ============================================================
 // api/trade/route.ts — Dev C
-// Trade execution endpoint — POST to submit orders
+// Trade execution endpoint — proxies to Python FastAPI backend
 // ============================================================
 
 import { NextResponse } from 'next/server';
-import { submitOrder, getAccount, getPositions } from '@/lib/alpaca';
+
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
 
 export async function POST(req: Request) {
     try {
         const body = await req.json();
-        const { ticker, qty, side, type, stop_loss } = body;
+        const res = await fetch(`${BACKEND_URL}/api/trade`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
 
-        // Validate required fields
-        if (!ticker || !qty || !side || !type) {
+        const data = await res.json();
+
+        if (!res.ok) {
             return NextResponse.json(
-                { success: false, error: 'Missing required fields: ticker, qty, side, type' },
-                { status: 400 }
+                { success: false, error: data.detail || 'Trade failed' },
+                { status: res.status }
             );
         }
 
-        // TODO: Dev C — check buying power before submitting
-        // const account = await getAccount();
-
-        const result = await submitOrder(ticker, qty, side, type, stop_loss);
-
-        return NextResponse.json(result);
+        return NextResponse.json(data);
     } catch (error) {
         console.error('[Trade API] Error:', error);
         return NextResponse.json(
@@ -41,18 +42,22 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const action = searchParams.get('action');
 
+    if (!action) {
+        return NextResponse.json({ error: "Missing 'action' query param. Use 'account' or 'positions'." }, { status: 400 });
+    }
+
     try {
-        if (action === 'account') {
-            const account = await getAccount();
-            return NextResponse.json(account);
+        const res = await fetch(`${BACKEND_URL}/api/trade?action=${action}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+            return NextResponse.json(
+                { error: data.detail || 'Request failed' },
+                { status: res.status }
+            );
         }
 
-        if (action === 'positions') {
-            const positions = await getPositions();
-            return NextResponse.json(positions);
-        }
-
-        return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
+        return NextResponse.json(data);
     } catch (error) {
         console.error('[Trade API] Error:', error);
         return NextResponse.json(
