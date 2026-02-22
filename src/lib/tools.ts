@@ -1,9 +1,17 @@
 // ============================================================
 // lib/tools.ts — Dev B
-// LLM tool definitions using Vercel AI SDK tool() helper
+// LLM tool definitions with server-side execute functions
+// These execute on the server and return data to the client
 // ============================================================
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
+import type { StockBar, TradeReceipt } from '@/types';
+
+// Internal helper — absolute URL builder for server-side fetch
+function getBaseUrl(): string {
+    // In production, use NEXT_PUBLIC_APP_URL; in dev, default to localhost
+    return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+}
 
 /** Tool: Render a stock chart for a given ticker */
 export const renderStockChartTool = {
@@ -11,15 +19,28 @@ export const renderStockChartTool = {
         'Display a stock chart for the given ticker symbol. Use this when the user asks about a stock price, performance, or wants to see a chart.',
     parameters: z.object({
         ticker: z.string().describe('The stock ticker symbol, e.g. AAPL, TSLA, MSFT'),
-        period: z
-            .enum(['1D', '1W', '1M', '3M', '1Y'])
-            .optional()
-            .default('1M')
-            .describe('Time period for the chart'),
+        period: z.enum(['1D', '1W', '1M', '3M', '1Y']).describe('Time period for the chart. Defaults to 1M if not specified.'),
     }),
     execute: async ({ ticker, period }: { ticker: string; period: string }) => {
-        // TODO: Dev B — call /api/market to fetch real data
-        return { ticker, period, bars: [] };
+        const normalizedTicker = ticker.toUpperCase();
+        const normalizedPeriod = period || '1M';
+        try {
+            const res = await fetch(
+                `${getBaseUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&period=${normalizedPeriod}`
+            );
+            if (!res.ok) {
+                return { ticker: normalizedTicker, period: normalizedPeriod, bars: [] as StockBar[], error: 'Failed to fetch market data' };
+            }
+            const data = await res.json();
+            return {
+                ticker: normalizedTicker,
+                period: normalizedPeriod,
+                bars: (data.bars || []) as StockBar[],
+            };
+        } catch (error) {
+            console.error('[render_stock_chart] Error:', error);
+            return { ticker: normalizedTicker, period: normalizedPeriod, bars: [] as StockBar[], error: 'Market data unavailable' };
+        }
     },
 };
 
@@ -29,13 +50,10 @@ export const generateTradeReceiptTool = {
         'Generate a trade confirmation receipt for the user to review before executing. Use this when the user wants to buy or sell a stock.',
     parameters: z.object({
         ticker: z.string().describe('The stock ticker symbol'),
-        qty: z.number().positive().describe('Number of shares'),
-        side: z.enum(['buy', 'sell']).describe('Buy or sell'),
-        orderType: z
-            .enum(['market', 'limit', 'stop', 'stop_limit'])
-            .default('market')
-            .describe('Order type'),
-        stopLoss: z.number().optional().describe('Stop loss price, if applicable'),
+        qty: z.number().describe('Number of shares to trade, must be positive'),
+        side: z.enum(['buy', 'sell']).describe('Whether to buy or sell'),
+        orderType: z.enum(['market', 'limit', 'stop', 'stop_limit']).describe('The order type. Default to market if not specified.'),
+        stopLoss: z.number().nullable().describe('Stop loss price if the user wants one, or null if not applicable'),
     }),
     execute: async ({
         ticker,
@@ -48,17 +66,33 @@ export const generateTradeReceiptTool = {
         qty: number;
         side: string;
         orderType: string;
-        stopLoss?: number;
-    }) => {
-        // TODO: Dev B — fetch current price from /api/market and compute estimated total
+        stopLoss: number | null;
+    }): Promise<TradeReceipt> => {
+        const normalizedTicker = ticker.toUpperCase();
+        // Fetch current price from market data API
+        let currentPrice = 0;
+        try {
+            const res = await fetch(
+                `${getBaseUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&action=quote`
+            );
+            if (res.ok) {
+                const quote = await res.json();
+                currentPrice = quote.price || 0;
+            }
+        } catch (error) {
+            console.error('[generate_trade_receipt] Price fetch error:', error);
+        }
+
+        const estimatedTotal = currentPrice * qty;
+
         return {
-            ticker,
+            ticker: normalizedTicker,
             qty,
-            side,
+            side: side as 'buy' | 'sell',
             orderType,
-            estimatedTotal: 0,
-            currentPrice: 0,
-            stopLoss,
+            estimatedTotal,
+            currentPrice,
+            stopLoss: stopLoss ?? undefined,
         };
     },
 };
