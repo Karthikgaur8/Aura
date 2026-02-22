@@ -22,36 +22,49 @@ Aura replaces the "15-tab trading spreadsheet" with a **Generative Spatial UI**.
 
 ## 🚀 Quick Start
 
+Follow these steps to get both the frontend UI and the Python trading backend running locally.
+
+### 1. Clone and Install
 ```bash
-# 1. Clone and install
 git clone https://github.com/Karthikgaur8/Aura.git
 cd Aura
 npm install
+```
 
-# 2. Set up Python backend
+### 2. Set up Python Backend
+The Python backend handles the Alpaca trading and market data endpoints.
+```bash
+# Ensure you are in the root 'Aura' directory
 py -m venv venv
 venv\Scripts\pip install -r backend\requirements.txt
+```
 
-# 3. Set up environment variables
-cp .env.example .env.local
-# Fill in your API keys (see table below)
-
-# 4. Start the Application (Requires 2 Terminals)
-
-**Terminal 1 (Python Backend):**
+### 3. Environment Variables
+Copy the example environment file and fill in your keys:
 ```bash
+cp .env.example .env.local
+```
+*Note: Make sure to add your `OPENAI_API_KEY` and Alpaca keys (see the table below).*
+
+### 4. Start the Application (Requires 2 Terminals)
+
+To run the full application, **you must start the backend and frontend concurrently in separate terminals**.
+
+**Terminal 1: Start the Python Backend**
+```bash
+# From the root 'Aura' directory
 cd backend
 ..\venv\Scripts\python.exe -m uvicorn main:app --reload
 ```
 *(Leave this terminal running in the background!)*
 
-**Terminal 2 (Next.js Frontend):**
-Open a **new** terminal in the root `Aura` directory:
+**Terminal 2: Start the Next.js Frontend**
+Open a **new** terminal prompt, ensure you are in the root `Aura` directory, and run:
 ```bash
 npm run dev
 ```
 
-Then, open your browser to **http://localhost:3000**
+Finally, open your browser to [http://localhost:3000](http://localhost:3000) to start trading!
 ## 🔑 Environment Variables
 
 | Variable | Description | Required |
