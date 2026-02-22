@@ -88,6 +88,11 @@ export function useVoice() {
         };
 
         recognition.onerror = (event: { error: string; message?: string }) => {
+            // "aborted" is expected when recognition is stopped/restarted — don't log it
+            if (event.error === 'aborted') {
+                setIsListening(false);
+                return;
+            }
             console.error('Speech recognition error:', event.error, event.message);
             setIsListening(false);
             setVoiceError(event.error);

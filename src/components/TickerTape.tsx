@@ -27,23 +27,28 @@ const MOCK_TICKERS: TickerItem[] = [
     { symbol: 'SPY', price: 523.18, change: 4.32, changePercent: 0.83 },
 ];
 
-function TickerItemDisplay({ item }: { item: TickerItem }) {
+function TickerItemDisplay({ item, showDivider }: { item: TickerItem; showDivider: boolean }) {
     const isPositive = item.change >= 0;
 
     return (
-        <div className="flex items-center gap-2 px-4 whitespace-nowrap">
-            <span className="text-xs font-bold" style={{ color: 'rgba(255,255,255,0.7)' }}>
-                {item.symbol}
-            </span>
-            <span className="text-xs font-mono" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                ${item.price.toFixed(2)}
-            </span>
-            <span
-                className="text-xs font-mono font-medium"
-                style={{ color: isPositive ? '#22c55e' : '#ef4444' }}
-            >
-                {isPositive ? '▲' : '▼'} {Math.abs(item.changePercent).toFixed(2)}%
-            </span>
+        <div className="flex items-center whitespace-nowrap" style={{ gap: '24px' }}>
+            <div className="flex items-center" style={{ gap: '10px' }}>
+                <span className="text-xs font-bold tracking-wide" style={{ color: 'rgba(255,255,255,0.8)' }}>
+                    {item.symbol}
+                </span>
+                <span className="text-xs font-mono" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                    ${item.price.toFixed(2)}
+                </span>
+                <span
+                    className="text-xs font-mono font-medium"
+                    style={{ color: isPositive ? '#22c55e' : '#ef4444' }}
+                >
+                    {isPositive ? '▲' : '▼'} {Math.abs(item.changePercent).toFixed(2)}%
+                </span>
+            </div>
+            {showDivider && (
+                <span style={{ color: 'rgba(255,255,255,0.1)', fontSize: '10px' }}>│</span>
+            )}
         </div>
     );
 }
@@ -63,17 +68,22 @@ export default function TickerTape() {
         >
             <motion.div
                 className="flex items-center h-full"
+                style={{ gap: '24px', paddingLeft: '24px', paddingRight: '24px' }}
                 animate={{ x: ['0%', '-50%'] }}
                 transition={{
                     x: {
-                        duration: 30,
+                        duration: 40,
                         repeat: Infinity,
                         ease: 'linear',
                     },
                 }}
             >
                 {items.map((item, i) => (
-                    <TickerItemDisplay key={`${item.symbol}-${i}`} item={item} />
+                    <TickerItemDisplay
+                        key={`${item.symbol}-${i}`}
+                        item={item}
+                        showDivider={i < items.length - 1}
+                    />
                 ))}
             </motion.div>
         </div>
