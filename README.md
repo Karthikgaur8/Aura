@@ -24,15 +24,23 @@ Aura replaces the "15-tab trading spreadsheet" with a **Generative Spatial UI**.
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/your-org/Aura.git
+git clone https://github.com/Karthikgaur8/Aura.git
 cd Aura
 npm install
 
-# 2. Set up environment variables
+# 2. Set up Python backend
+py -m venv venv
+venv\Scripts\pip install -r backend\requirements.txt
+
+# 3. Set up environment variables
 cp .env.example .env.local
 # Fill in your API keys (see table below)
 
-# 3. Run dev server
+# 4. Start Python backend (Terminal 1)
+cd backend
+..\venv\Scripts\python -m uvicorn main:app --port 8000
+
+# 5. Start Next.js frontend (Terminal 2)
 npm run dev
 # Open http://localhost:3000
 ```
@@ -44,7 +52,8 @@ npm run dev
 | `OPENAI_API_KEY` | OpenAI API key for GPT-4o | ✅ |
 | `ALPACA_API_KEY` | Alpaca paper trading API key | ✅ |
 | `ALPACA_API_SECRET` | Alpaca paper trading API secret | ✅ |
-| `ALPACA_BASE_URL` | Alpaca API base URL (paper) | ✅ |
+| `ALPACA_BASE_URL` | `https://paper-api.alpaca.markets` | ✅ |
+| `BACKEND_URL` | Python backend URL (default: `http://localhost:8000`) | Optional |
 | `ELEVENLABS_API_KEY` | ElevenLabs TTS API key | Optional |
 | `NEXT_PUBLIC_APP_URL` | App URL (default: http://localhost:3000) | Optional |
 
@@ -58,8 +67,8 @@ src/
 │   ├── globals.css             # Global styles + dark theme (Dev A)
 │   └── api/
 │       ├── chat/route.ts       # LLM streaming endpoint (Dev B)
-│       ├── trade/route.ts      # Trade execution endpoint (Dev C)
-│       └── market/route.ts     # Market data endpoint (Dev C)
+│       ├── trade/route.ts      # Trade proxy → Python backend (Dev C)
+│       └── market/route.ts     # Market data proxy → Python backend (Dev C)
 │
 ├── components/                 # UI components (Dev A)
 │   ├── VoiceOrb.tsx            # Animated center orb
@@ -77,12 +86,16 @@ src/
 │
 ├── lib/                        # Shared utilities
 │   ├── ai.ts                   # OpenAI config + system prompt (Dev B)
-│   ├── tools.ts                # LLM tool definitions (Dev B)
-│   ├── alpaca.ts               # Alpaca client (Dev C)
-│   └── market.ts               # Market data fetching (Dev C)
+│   └── tools.ts                # LLM tool definitions (Dev B)
 │
 └── types/
     └── index.ts                # Shared TypeScript types
+
+backend/                        # Python FastAPI backend (Dev C)
+├── main.py                     # FastAPI app — /api/trade, /api/market, /api/health
+├── alpaca_client.py            # Alpaca trading client (stocks + crypto)
+├── market_data.py              # Market data via Alpaca Data API
+└── requirements.txt            # Python dependencies
 ```
 
 ## 👥 Team Roles
@@ -91,7 +104,7 @@ src/
 |---|---|---|
 | **Dev A** | Frontend / Animations | `components/*`, `page.tsx`, `globals.css` |
 | **Dev B** | AI / LLM / Voice | `hooks/*`, `lib/ai.ts`, `lib/tools.ts`, `api/chat/` |
-| **Dev C** | Alpaca / Market Data | `lib/alpaca.ts`, `lib/market.ts`, `api/trade/`, `api/market/` |
+| **Dev C** | Alpaca / Market Data | `backend/*`, `api/trade/`, `api/market/` |
 
 ## 🔀 Branch Strategy
 
@@ -105,10 +118,15 @@ main
 ## 📜 Scripts
 
 ```bash
-npm run dev      # Start dev server
+# Frontend
+npm run dev      # Start Next.js dev server (localhost:3000)
 npm run build    # Production build
 npm run start    # Start production server
 npm run lint     # Run ESLint
+
+# Backend (run from backend/ folder)
+..\venv\Scripts\python -m uvicorn main:app --port 8000          # Start backend
+..\venv\Scripts\python -m uvicorn main:app --port 8000 --reload # Start with auto-reload
 ```
 
 ## 📄 License
