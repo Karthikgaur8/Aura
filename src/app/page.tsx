@@ -68,12 +68,28 @@ export default function Home() {
   const [wakeTranscript, setWakeTranscript] = useState('');
 
   // UI state
-  const [mode, setMode] = useState<InteractionMode>('voice');
+  const [mode, setModeRaw] = useState<InteractionMode>('voice');
+
+  // When switching modes, stop voice listening immediately
+  const setMode = useCallback((newMode: InteractionMode) => {
+    if (newMode !== 'voice') {
+      voice.stopListening();
+    }
+    setModeRaw(newMode);
+  }, [voice]);
   const [showConfetti, setShowConfetti] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
 
   // appState comes from chat hook (auto-managed by tool invocations)
   const appState = chat.appState;
+
+  // Busy ref — prevents sending messages while AI is still processing.
+  // We use a ref (not state) because callbacks created by startListening
+  // capture the value at call-time, not render-time.
+  const isBusyRef = useRef(false);
+  useEffect(() => {
+    isBusyRef.current = chat.isLoading;
+  }, [chat.isLoading]);
 
   // ── Cinematic intro timer ──
   useEffect(() => {
@@ -144,15 +160,39 @@ export default function Home() {
       hasAutoEntered.current = true;
       // Greet the user and start listening
       voice.speak('Hey! How can I help you today?');
-      // Start listening after greeting finishes
-      setTimeout(() => {
-        voice.startListening((text) => {
-          setShowThinking(true);
-          chat.submitMessage(text);
-        });
-      }, 2000);
     }
-  }, [isAwake, voice, chat]);
+  }, [isAwake, voice]);
+
+  // ── Auto-listen loop: after Aura finishes speaking, re-open the mic ──
+  const wasSpeaking = useRef(false);
+  useEffect(() => {
+    if (voice.isSpeaking) {
+      wasSpeaking.current = true;
+    }
+
+    if (!voice.isSpeaking && wasSpeaking.current) {
+      wasSpeaking.current = false;
+
+      if (mode !== 'voice' || !isAwake) return;
+      // Don't reopen mic while AI is still processing a previous request
+      if (isBusyRef.current) return;
+
+      const t = setTimeout(() => {
+        if (isBusyRef.current) return;
+        try {
+          voice.startListening((text) => {
+            if (isBusyRef.current) return;
+            setShowThinking(true);
+            chat.submitMessage(text);
+          });
+        } catch {
+          // Mic grab failed — user can tap orb manually
+        }
+      }, 1200);
+
+      return () => clearTimeout(t);
+    }
+  }, [voice.isSpeaking, mode, isAwake, voice, chat]);
 
   // ── Watch for appState changes to dismiss thinking ──
   useEffect(() => {
@@ -161,14 +201,44 @@ export default function Home() {
     }
   }, [appState]);
 
-  // ── Also dismiss thinking when loading finishes ──
+  // ── Dismiss thinking when chat errors out ──
   useEffect(() => {
-    if (!chat.isLoading && showThinking) {
-      // Small delay to let animations complete
-      const t = setTimeout(() => setShowThinking(false), 500);
+    if (chat.error) {
+      setShowThinking(false);
+    }
+  }, [chat.error]);
+
+  // ── Dismiss thinking only after loading has actually started and finished ──
+  const hasStartedLoading = useRef(false);
+  useEffect(() => {
+    if (chat.isLoading) {
+      hasStartedLoading.current = true;
+    }
+
+    if (!chat.isLoading && showThinking && hasStartedLoading.current) {
+      const t = setTimeout(() => {
+        setShowThinking(false);
+        hasStartedLoading.current = false;
+      }, 500);
       return () => clearTimeout(t);
     }
   }, [chat.isLoading, showThinking]);
+
+  // ── Safety net: never let thinking spin forever ──
+  useEffect(() => {
+    if (!showThinking) return;
+    const safety = setTimeout(() => {
+      setShowThinking(false);
+      hasStartedLoading.current = false;
+    }, 20000);
+    return () => clearTimeout(safety);
+  }, [showThinking]);
+
+  // #region agent log
+  useEffect(() => {
+    fetch('http://127.0.0.1:7299/ingest/98580928-d973-4442-9a49-20081ca81a13',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8a9847'},body:JSON.stringify({sessionId:'8a9847',location:'page.tsx:stateTracker',message:'State snapshot',data:{appState,showThinking,isListening:voice.isListening,isSpeaking:voice.isSpeaking,isLoading:chat.isLoading,mode,hasChart:!!chat.chartData,hasReceipt:!!chat.tradeReceipt,hasError:!!chat.error},timestamp:Date.now()})}).catch(()=>{});
+  }, [appState, showThinking, voice.isListening, voice.isSpeaking, chat.isLoading, mode, chat.chartData, chat.tradeReceipt, chat.error]);
+  // #endregion
 
   // ── Adapt messages for ChatMessages component ──
   const adaptedMessages: ChatMessage[] = chat.messages
@@ -183,6 +253,7 @@ export default function Home() {
 
   // ── Handlers ──
   const handleChatSubmit = useCallback(() => {
+    if (isBusyRef.current) return;
     setShowThinking(true);
     chat.handleSubmit(new Event('submit') as unknown as React.FormEvent);
   }, [chat]);
@@ -197,22 +268,29 @@ export default function Home() {
     };
     const result = await trade.executeTrade(order);
     if (result.success) {
-      chat.clearReceipt();
       setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 3000);
+      chat.clearReceipt();
+      // After confetti, speak and reset
+      voice.speak('Trade executed. What is the next move?');
+      setTimeout(() => {
+        setShowConfetti(false);
+      }, 3000);
     }
-  }, [chat, trade]);
+  }, [chat, trade, voice]);
 
   const handleVoiceTap = useCallback(() => {
+    if (mode !== 'voice') return;
+
     if (voice.isListening) {
       voice.stopListening();
-    } else {
+    } else if (!isBusyRef.current) {
       voice.startListening((text) => {
+        if (isBusyRef.current) return;
         setShowThinking(true);
         chat.submitMessage(text);
       });
     }
-  }, [voice, chat]);
+  }, [voice, chat, mode]);
 
   const resetToEntry = useCallback(() => {
     chat.clearChart();
@@ -367,8 +445,10 @@ export default function Home() {
   }
 
   // ════════════════════════════════════════════════════════
-  //  PHASE 3: MAIN APP
+  //  PHASE 3: MAIN APP — Spatial Split Layout
   // ════════════════════════════════════════════════════════
+  const isDataVisible = appState === 'data-render' || appState === 'trade-confirm';
+
   return (
     <LayoutGroup>
       <div className="relative min-h-screen w-full overflow-hidden film-grain"
@@ -385,345 +465,300 @@ export default function Home() {
         </div>
 
         {/* ── Content ── */}
-        <div className="relative z-10 min-h-screen flex flex-col pt-8">
+        <div className="relative z-10 min-h-screen flex pt-8">
 
-          {/* ── Top header bar ── */}
-          <AnimatePresence>
-            {appState !== 'entry' && (
-              <motion.header
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="fixed top-8 left-0 right-0 z-40 px-6 py-3"
-                style={{ background: 'linear-gradient(to bottom, rgba(10,10,15,0.95) 0%, transparent 100%)' }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="cursor-pointer" onClick={resetToEntry} title="Back to home">
-                    <MorphingOrb isCompact isActive={isOrbActive} />
-                  </div>
-                  <motion.span
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="text-sm font-bold text-gradient-animated"
-                  >
-                    Aura
-                  </motion.span>
-
-                  <div className="ml-auto flex items-center gap-4">
-                    {/* Global Voice Transcript Preview */}
-                    {voice.transcript && voice.isListening && (
-                      <motion.p
-                        initial={{ opacity: 0, x: 10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className="text-xs font-mono max-w-[200px] truncate"
-                        style={{ color: 'rgba(255,255,255,0.6)' }}
-                      >
-                        🎙️ {voice.transcript}
-                      </motion.p>
-                    )}
-
-                    <StatusPill
-                      text={
-                        chat.isLoading ? 'Processing…' :
-                          voice.isListening ? 'Listening…' :
-                            voice.isSpeaking ? 'Speaking…' :
-                              appState === 'trade-confirm' ? 'Awaiting confirmation' :
-                                'Ready'
-                      }
-                      icon={
-                        chat.isLoading ? '🧠' :
-                          voice.isListening ? '🎙️' :
-                            voice.isSpeaking ? '🔊' :
-                              appState === 'trade-confirm' ? '⚠️' :
-                                '✨'
-                      }
-                      visible={true}
-                      variant={appState === 'trade-confirm' ? 'warning' : 'default'}
-                    />
-                  </div>
-                </div>
-              </motion.header>
-            )}
-          </AnimatePresence>
-
-          {/* ═══════════════════════════════════════════
-              STATE 1: ENTRY
-             ═══════════════════════════════════════════ */}
-          <AnimatePresence mode="wait">
-            {appState === 'entry' && (
-              <motion.div
-                key="entry"
-                className="flex-1 flex flex-col items-center justify-center gap-5 px-6"
-                {...pageTransition}
-              >
+          {/* ═══════════════════════════════════════════════════
+              LEFT SIDE PANEL — Orb + Controls (always present)
+             ═══════════════════════════════════════════════════ */}
+          <motion.div
+            layout
+            className="flex flex-col items-center justify-center gap-4 relative z-20"
+            style={{
+              width: isDataVisible ? '15%' : '100%',
+              minHeight: '100vh',
+              padding: isDataVisible ? '0.75rem' : '1.5rem',
+            }}
+            transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+          >
+            {/* Title — only in entry */}
+            <AnimatePresence>
+              {appState === 'entry' && (
                 <motion.div
                   initial={{ opacity: 0, y: -20 }}
                   animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
                   className="text-center mb-2"
                 >
-                  <h1 className="text-5xl font-bold text-gradient-animated mb-2">
+                  <h1 className={`font-bold text-gradient-animated mb-2 ${isDataVisible ? 'text-xl' : 'text-5xl'}`}>
                     Aura
                   </h1>
-                  <p className="text-sm tracking-widest uppercase"
-                    style={{ color: 'rgba(255,255,255,0.3)' }}>
-                    Talk · See · Trade
-                  </p>
-                </motion.div>
-
-                {/* Morphing Orb — tap for voice */}
-                <motion.div
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ delay: 0.1, type: 'spring', stiffness: 200 }}
-                  className="cursor-pointer"
-                  onClick={handleVoiceTap}
-                >
-                  <MorphingOrb isCompact={false} isActive={isOrbActive} />
-                </motion.div>
-
-                {/* Status pill */}
-                <StatusPill
-                  text={
-                    showThinking ? 'Analyzing…' :
-                      voice.isListening ? 'Listening — speak now…' :
-                        voice.isSpeaking ? 'Aura is speaking…' :
-                          chat.isLoading ? 'Thinking…' :
-                            mode === 'voice' ? 'Tap the orb to start talking' :
-                              'Type your question below'
-                  }
-                  icon={
-                    showThinking ? '🧠' :
-                      voice.isListening ? '🎙️' :
-                        voice.isSpeaking ? '🔊' :
-                          mode === 'voice' ? '🎙️' : '💬'
-                  }
-                  visible={true}
-                />
-
-                {/* Voice transcript preview */}
-                {voice.transcript && voice.isListening && (
-                  <motion.p
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-sm font-mono text-center max-w-md"
-                    style={{ color: 'rgba(255,255,255,0.4)' }}
-                  >
-                    🎙️ {voice.transcript}
-                  </motion.p>
-                )}
-
-                {/* AI Thinking Chain */}
-                <AnimatePresence>
-                  {showThinking && (
-                    <AIThinkingChain isActive={showThinking} onComplete={() => { }} />
+                  {!isDataVisible && (
+                    <p className="text-sm tracking-widest uppercase"
+                      style={{ color: 'rgba(255,255,255,0.3)' }}>
+                      Talk · See · Trade
+                    </p>
                   )}
-                </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-                {/* Chat messages + input */}
-                <AnimatePresence>
-                  {mode === 'chat' && !showThinking && (
+            {/* "Aura" label when data is visible */}
+            {isDataVisible && (
+              <motion.span
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-xl font-bold text-gradient-animated mb-1"
+              >
+                Aura
+              </motion.span>
+            )}
+
+            {/* Morphing Orb — tap for voice */}
+            <motion.div
+              layout
+              className="cursor-pointer"
+              onClick={handleVoiceTap}
+              style={{
+                transform: isDataVisible ? 'scale(0.5)' : 'scale(1)',
+                transition: 'transform 0.4s ease',
+              }}
+            >
+              <MorphingOrb isCompact={false} isActive={isOrbActive} />
+            </motion.div>
+
+            {/* Status pill — hidden when AIThinkingChain is visible to avoid duplicate */}
+            <StatusPill
+              text={
+                voice.isListening ? 'Listening...' :
+                  voice.isSpeaking ? 'Speaking...' :
+                    chat.isLoading ? 'Thinking...' :
+                      mode === 'voice' ? 'Tap orb to talk' :
+                        'Type below'
+              }
+              icon=""
+              visible={!showThinking}
+              variant={appState === 'trade-confirm' ? 'warning' : 'default'}
+            />
+
+            {/* Voice transcript preview */}
+            {voice.transcript && voice.isListening && (
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-xs font-mono text-center max-w-[180px] truncate"
+                style={{ color: 'rgba(255,255,255,0.4)' }}
+              >
+                {voice.transcript}
+              </motion.p>
+            )}
+
+            <AnimatePresence>
+              {showThinking && (
+                <AIThinkingChain isActive={showThinking} onComplete={() => { }} />
+              )}
+            </AnimatePresence>
+
+            {/* Chat messages + input (in chat mode or when data visible) */}
+            <AnimatePresence>
+              {mode === 'chat' && !showThinking && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 20 }}
+                  className="w-full flex flex-col gap-3"
+                  style={{ maxWidth: isDataVisible ? '100%' : '32rem' }}
+                >
+                  <ChatMessages messages={adaptedMessages} isLoading={chat.isLoading} />
+                  <ChatInput
+                    value={chat.input}
+                    onChange={(val) => chat.setInput(val)}
+                    onSubmit={handleChatSubmit}
+                    isLoading={chat.isLoading}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Error display */}
+            {chat.error && (
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-xs text-red-400 max-w-md text-center"
+              >
+                {chat.error.message}
+              </motion.p>
+            )}
+
+            {/* Back button when data is visible */}
+            {isDataVisible && (
+              <motion.button
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                onClick={resetToEntry}
+                className="text-xs px-4 py-2 rounded-lg glass magnetic-hover mt-2"
+                style={{ color: 'rgba(255,255,255,0.5)' }}
+              >
+                Back
+              </motion.button>
+            )}
+          </motion.div>
+
+          {/* ═══════════════════════════════════════════════════
+              CENTER PANEL — Charts / Receipts (only when data)
+             ═══════════════════════════════════════════════════ */}
+          <AnimatePresence>
+            {isDataVisible && (
+              <motion.div
+                initial={{ opacity: 0, x: 40 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 40 }}
+                transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+                className="flex-1 flex flex-col items-center justify-center gap-5 px-6 py-10"
+                style={{ minHeight: '100vh' }}
+              >
+                {/* ── DATA RENDER: Chart + Actions ── */}
+                {appState === 'data-render' && (
+                  <motion.div
+                    key="data-panel"
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="w-full max-w-3xl flex flex-col gap-5"
+                  >
+                    {/* Chat messages (in the center panel) */}
+                    {adaptedMessages.length > 0 && (
+                      <ChatMessages messages={adaptedMessages} isLoading={chat.isLoading} />
+                    )}
+
+                    {/* Chart */}
+                    {chat.chartData && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.1 }}
+                      >
+                        <StockChart
+                          ticker={chat.chartData.ticker}
+                          data={chat.chartData.bars}
+                          period={chat.chartData.period}
+                        />
+                      </motion.div>
+                    )}
+
+                    {/* Action buttons */}
                     <motion.div
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 20 }}
-                      className="w-full max-w-xl flex flex-col gap-3"
+                      transition={{ delay: 0.3 }}
+                      className="flex items-center gap-3 justify-center"
                     >
-                      <ChatMessages messages={adaptedMessages} isLoading={chat.isLoading} />
-                      <ChatInput
-                        value={chat.input}
-                        onChange={(val) => chat.setInput(val)}
-                        onSubmit={handleChatSubmit}
-                        isLoading={chat.isLoading}
-                      />
+                      <button
+                        onClick={() => {
+                          setShowThinking(true);
+                          chat.submitMessage(`Buy 5 shares of ${chat.chartData?.ticker || 'AAPL'}`);
+                        }}
+                        className="px-6 py-3 rounded-xl text-sm font-medium text-white magnetic-hover"
+                        style={{
+                          background: 'linear-gradient(135deg, rgba(34,197,94,0.2), rgba(34,197,94,0.1))',
+                          border: '1px solid rgba(34,197,94,0.3)',
+                          boxShadow: '0 0 20px rgba(34,197,94,0.15)',
+                        }}
+                      >
+                        Execute Trade
+                      </button>
                     </motion.div>
-                  )}
-                </AnimatePresence>
+                  </motion.div>
+                )}
 
-                {/* Error display */}
-                {chat.error && (
-                  <motion.p
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-xs text-red-400 max-w-md text-center"
+                {/* ── TRADE CONFIRM: Receipt + Slide ── */}
+                {appState === 'trade-confirm' && chat.tradeReceipt && (
+                  <motion.div
+                    key="trade-panel"
+                    initial={{ opacity: 0, scale: 0.9, filter: 'blur(8px)' }}
+                    animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+                    exit={{ opacity: 0, scale: 0.9, filter: 'blur(8px)' }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                    className="flex flex-col items-center gap-6"
                   >
-                    ⚠️ {chat.error.message}
-                  </motion.p>
+                    <TradeReceiptCard receipt={chat.tradeReceipt} />
+                    <SlideToConfirm onConfirm={handleTradeConfirm} isLoading={trade.isExecuting} />
+
+                    {/* Trade result feedback */}
+                    {trade.result && !trade.result.success && (
+                      <motion.p
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="text-xs text-red-400"
+                      >
+                        {trade.result.error || 'Trade failed'}
+                      </motion.p>
+                    )}
+
+                    <button
+                      onClick={() => chat.clearReceipt()}
+                      className="text-sm transition-colors hover:text-white"
+                      style={{ color: 'rgba(255,255,255,0.4)' }}
+                    >
+                      Cancel
+                    </button>
+                  </motion.div>
                 )}
               </motion.div>
             )}
-
-            {/* ═══════════════════════════════════════════
-                STATE 2: DATA RENDER
-               ═══════════════════════════════════════════ */}
-            {appState === 'data-render' && (
-              <motion.div
-                key="data-render"
-                className="flex-1 flex flex-col items-center justify-center px-6 py-20"
-                {...pageTransition}
-              >
-                <div className="w-full max-w-4xl flex flex-col gap-5">
-                  {/* Portfolio dashboard */}
-                  <PortfolioDashboard />
-
-                  {/* Chat messages */}
-                  {adaptedMessages.length > 0 && (
-                    <ChatMessages messages={adaptedMessages} isLoading={chat.isLoading} />
-                  )}
-
-                  {/* Chart — from real API data */}
-                  {chat.chartData && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: 0.2, duration: 0.5 }}
-                    >
-                      <StockChart
-                        ticker={chat.chartData.ticker}
-                        data={chat.chartData.bars}
-                        period={chat.chartData.period}
-                      />
-                    </motion.div>
-                  )}
-
-                  {/* Actions */}
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.4 }}
-                    className="flex flex-col sm:flex-row items-center gap-3 justify-center"
-                  >
-                    <button
-                      onClick={() => {
-                        setShowThinking(true);
-                        chat.submitMessage(`Buy 5 shares of ${chat.chartData?.ticker || 'AAPL'}`);
-                      }}
-                      className="px-6 py-3 rounded-xl text-sm font-medium text-white magnetic-hover"
-                      style={{
-                        background: 'linear-gradient(135deg, rgba(34,197,94,0.2), rgba(34,197,94,0.1))',
-                        border: '1px solid rgba(34,197,94,0.3)',
-                        boxShadow: '0 0 20px rgba(34,197,94,0.15)',
-                      }}
-                    >
-                      📈 Execute Trade
-                    </button>
-                    <button
-                      onClick={resetToEntry}
-                      className="px-6 py-3 rounded-xl text-sm font-medium glass magnetic-hover"
-                      style={{ color: 'rgba(255,255,255,0.6)' }}
-                    >
-                      ← Back
-                    </button>
-                  </motion.div>
-
-                  {/* Chat input */}
-                  <div className="mt-2">
-                    <ChatInput
-                      value={chat.input}
-                      onChange={(val) => chat.setInput(val)}
-                      onSubmit={handleChatSubmit}
-                      isLoading={chat.isLoading}
-                    />
-                  </div>
-                </div>
-              </motion.div>
-            )}
           </AnimatePresence>
 
-          {/* ═══════════════════════════════════════════
-              STATE 3: TRADE CONFIRM
-             ═══════════════════════════════════════════ */}
-          <AnimatePresence>
-            {appState === 'trade-confirm' && chat.tradeReceipt && (
-              <>
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="fixed inset-0 z-30 backdrop-dim"
-                  onClick={() => chat.clearReceipt()}
-                />
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9, filter: 'blur(8px)' }}
-                  animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-                  exit={{ opacity: 0, scale: 0.9, filter: 'blur(8px)' }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                  className="fixed inset-0 z-40 flex flex-col items-center justify-center gap-6 px-6"
-                >
-                  <TradeReceiptCard receipt={chat.tradeReceipt} />
-                  <SlideToConfirm onConfirm={handleTradeConfirm} isLoading={trade.isExecuting} />
+        </div>
 
-                  {/* Trade result feedback */}
-                  {trade.result && !trade.result.success && (
-                    <motion.p
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="text-xs text-red-400"
-                    >
-                      ⚠️ {trade.result.error || 'Trade failed'}
-                    </motion.p>
-                  )}
+        {/* ── Mode Toggle (always at bottom center) ── */}
+        {!showThinking && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30"
+          >
+            <ModeToggle mode={mode} onToggle={setMode} />
+          </motion.div>
+        )}
 
-                  <button
-                    onClick={() => chat.clearReceipt()}
-                    className="text-sm transition-colors hover:text-white"
-                    style={{ color: 'rgba(255,255,255,0.4)' }}
-                  >
-                    Cancel
-                  </button>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
+        {/* Confetti */}
+        <ConfettiSuccess show={showConfetti} />
 
-          {/* ── Mode Toggle ── */}
+        {/* ── Demo controls ── */}
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
           {appState === 'entry' && !showThinking && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30"
+            <button
+              onClick={() => {
+                setShowThinking(true);
+                chat.submitMessage("How's Apple doing?");
+              }}
+              className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-500 hover:text-white transition-colors"
             >
-              <ModeToggle mode={mode} onToggle={setMode} />
-            </motion.div>
+              Demo: AAPL
+            </button>
           )}
-
-          {/* Confetti */}
-          <ConfettiSuccess show={showConfetti} />
-
-          {/* ── Demo controls ── */}
-          <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-            {appState === 'entry' && !showThinking && (
-              <button
-                onClick={() => {
-                  setShowThinking(true);
-                  chat.submitMessage("How's Apple doing?");
-                }}
-                className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-500 hover:text-white transition-colors"
-              >
-                Demo: AAPL →
-              </button>
-            )}
-            {appState === 'data-render' && (
-              <button
-                onClick={() => {
-                  chat.submitMessage(`Buy 5 shares of ${chat.chartData?.ticker || 'AAPL'}`);
-                }}
-                className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-500 hover:text-white transition-colors"
-              >
-                Demo: Trade →
-              </button>
-            )}
-            {(appState !== 'entry' || showThinking) && (
-              <button
-                onClick={resetToEntry}
-                className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-500 hover:text-white transition-colors"
-              >
-                ← Reset
-              </button>
-            )}
-          </div>
+          {appState === 'data-render' && (
+            <button
+              onClick={() => {
+                chat.submitMessage(`Buy 5 shares of ${chat.chartData?.ticker || 'AAPL'}`);
+              }}
+              className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-500 hover:text-white transition-colors"
+            >
+              Demo: Trade
+            </button>
+          )}
+          {(appState !== 'entry' || showThinking) && (
+            <button
+              onClick={resetToEntry}
+              className="text-xs px-3 py-1.5 rounded-lg glass text-zinc-500 hover:text-white transition-colors"
+            >
+              Reset
+            </button>
+          )}
         </div>
       </div>
     </LayoutGroup>
   );
 }
+
