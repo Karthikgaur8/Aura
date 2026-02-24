@@ -25,6 +25,7 @@ export function useVoice() {
     const recognitionRef = useRef<any>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const onResultRef = useRef<((text: string) => void) | null>(null);
+    const isSpeakingRef = useRef(false);
 
     // Check browser support + preload voices on mount
     useEffect(() => {
@@ -47,6 +48,9 @@ export function useVoice() {
     const startListening = useCallback((onResult?: (text: string) => void) => {
         if (typeof window === 'undefined') return;
 
+        // Don't open mic while TTS is still playing — causes echo/contention
+        if (isSpeakingRef.current) return;
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         if (!SpeechRecognition) {
@@ -54,18 +58,18 @@ export function useVoice() {
             return;
         }
 
-        // Stop any existing recognition
+        // Cleanly tear down any existing recognition instance
         if (recognitionRef.current) {
-            recognitionRef.current.abort();
+            try { recognitionRef.current.abort(); } catch { /* */ }
+            recognitionRef.current = null;
         }
 
         const recognition = new SpeechRecognition();
-        recognition.continuous = true;         // Keep listening until user stops
-        recognition.interimResults = true;     // Show interim results for visual feedback
+        recognition.continuous = true;
+        recognition.interimResults = true;
         recognition.lang = 'en-US';
         recognition.maxAlternatives = 1;
 
-        // Store callback ref
         onResultRef.current = onResult || null;
 
         recognition.onstart = () => {
@@ -73,7 +77,8 @@ export function useVoice() {
             setTranscript('');
         };
 
-        recognition.onresult = (event: { results: { isFinal: boolean;[index: number]: { transcript: string } }[] }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        recognition.onresult = (event: any) => {
             let finalTranscript = '';
             let interimTranscript = '';
 
@@ -86,34 +91,23 @@ export function useVoice() {
                 }
             }
 
-            // Show interim results for visual feedback
             setTranscript(finalTranscript || interimTranscript);
 
-            // When we have a final result, trigger the callback
             if (finalTranscript) {
                 onResultRef.current?.(finalTranscript.trim());
-                // Auto-stop after getting a complete phrase
                 try { recognition.stop(); } catch { /* */ }
                 setIsListening(false);
             }
         };
 
         recognition.onerror = (event: { error: string; message?: string }) => {
-            // "aborted" is expected when recognition is stopped/restarted — don't log it
-            if (event.error === 'aborted') {
+            if (event.error === 'aborted' || event.error === 'no-speech' || event.error === 'audio-capture') {
                 setIsListening(false);
                 return;
             }
             console.error('Speech recognition error:', event.error, event.message);
             setIsListening(false);
             setVoiceError(event.error);
-
-            // Provide user-friendly feedback for common errors
-            if (event.error === 'not-allowed') {
-                alert('Microphone access denied. Please allow microphone permissions in your browser to use voice chat.');
-            } else if (event.error === 'network') {
-                alert('Network error occurred during speech recognition. Please check your connection.');
-            }
         };
 
         recognition.onend = () => {
@@ -122,7 +116,13 @@ export function useVoice() {
 
         recognitionRef.current = recognition;
         setVoiceError(null);
-        recognition.start();
+
+        try {
+            recognition.start();
+        } catch (err) {
+            console.warn('Speech recognition start failed:', err);
+            setIsListening(false);
+        }
     }, []);
 
     /** Stop listening */
@@ -137,10 +137,18 @@ export function useVoice() {
     const speak = useCallback(async (text: string) => {
         if (!text || typeof window === 'undefined') return;
 
+        // Stop mic before speaking to prevent echo feedback
+        if (recognitionRef.current) {
+            try { recognitionRef.current.abort(); } catch { /* */ }
+            recognitionRef.current = null;
+            setIsListening(false);
+        }
+
         // Cancel any ongoing speech
         stopSpeaking();
 
         setIsSpeaking(true);
+        isSpeakingRef.current = true;
 
         // Try ElevenLabs first (if API key is configured)
         if (ELEVENLABS_API_KEY) {
@@ -172,12 +180,14 @@ export function useVoice() {
                     audioRef.current = audio;
 
                     audio.onended = () => {
+                        isSpeakingRef.current = false;
                         setIsSpeaking(false);
                         URL.revokeObjectURL(url);
                         audioRef.current = null;
                     };
 
                     audio.onerror = () => {
+                        isSpeakingRef.current = false;
                         setIsSpeaking(false);
                         URL.revokeObjectURL(url);
                         audioRef.current = null;
@@ -210,8 +220,8 @@ export function useVoice() {
             utterance.voice = preferredVoice;
         }
 
-        utterance.onend = () => setIsSpeaking(false);
-        utterance.onerror = () => setIsSpeaking(false);
+        utterance.onend = () => { isSpeakingRef.current = false; setIsSpeaking(false); };
+        utterance.onerror = () => { isSpeakingRef.current = false; setIsSpeaking(false); };
 
         window.speechSynthesis.speak(utterance);
     }, []);
@@ -228,6 +238,7 @@ export function useVoice() {
 
         // Stop browser TTS
         window.speechSynthesis.cancel();
+        isSpeakingRef.current = false;
         setIsSpeaking(false);
     }, []);
 
