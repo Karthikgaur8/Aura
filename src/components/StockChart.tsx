@@ -65,10 +65,12 @@ export default function StockChart({ ticker, data, period }: StockChartProps) {
 
         seriesRef.current = candleSeries;
 
-        // Map data
         if (data.length > 0) {
+            const isIntraday = period === '1D' || period === '1W';
             const chartData = data.map((bar) => ({
-                time: bar.timestamp as unknown as import('lightweight-charts').Time,
+                time: isIntraday
+                    ? (Math.floor(new Date(bar.timestamp).getTime() / 1000) as import('lightweight-charts').UTCTimestamp)
+                    : (bar.timestamp.slice(0, 10) as unknown as import('lightweight-charts').Time),
                 open: bar.open,
                 high: bar.high,
                 low: bar.low,

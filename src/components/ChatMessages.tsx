@@ -36,7 +36,7 @@ export default function ChatMessages({ messages, isLoading }: ChatMessagesProps)
         <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="w-full max-w-xl mx-auto flex-1 min-h-0"
+            className="w-full flex-1 min-h-0"
         >
             <div
                 ref={scrollRef}
@@ -77,7 +77,18 @@ export default function ChatMessages({ messages, isLoading }: ChatMessagesProps)
                                                 }
                                         }
                                     >
-                                        {msg.content}
+                                        {msg.role === 'assistant'
+                                            ? msg.content
+                                                .replace(/\*\*(.+?)\*\*/g, '$1')
+                                                .replace(/\*(.+?)\*/g, '$1')
+                                                .replace(/__(.+?)__/g, '$1')
+                                                .replace(/_(.+?)_/g, '$1')
+                                                .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}]/gu, '')
+                                                .replace(/[→←↑↓·•]/g, '')
+                                                .replace(/\s{2,}/g, ' ')
+                                                .trim()
+                                            : msg.content
+                                        }
                                     </div>
                                 )}
 

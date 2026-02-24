@@ -7,11 +7,9 @@
 import { z } from 'zod/v3';
 import type { StockBar, TradeReceipt } from '@/types';
 
-// Internal helper — absolute URL builder for server-side fetch
-function getBaseUrl(): string {
-    // In production, use NEXT_PUBLIC_APP_URL; in dev, default to localhost
-    return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-}
+// Call the Python backend directly — tools execute server-side inside Next.js,
+// so calling Next.js API routes from here would be a self-referencing HTTP loop.
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000';
 
 /** Tool: Get a live stock quote */
 export const getStockQuoteTool = {
@@ -22,9 +20,12 @@ export const getStockQuoteTool = {
     }),
     execute: async ({ ticker }: { ticker: string }) => {
         const normalizedTicker = ticker.toUpperCase();
+        // #region agent log
+        fetch('http://127.0.0.1:7299/ingest/98580928-d973-4442-9a49-20081ca81a13',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8a9847'},body:JSON.stringify({sessionId:'8a9847',location:'tools.ts:get_stock_quote',message:'Tool executing',data:{ticker:normalizedTicker,backendUrl:BACKEND_URL},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         try {
             const res = await fetch(
-                `${getBaseUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&action=quote`
+                `${BACKEND_URL}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&action=quote`
             );
             if (!res.ok) {
                 return { ticker: normalizedTicker, error: 'Failed to fetch quote' };
@@ -49,9 +50,12 @@ export const renderStockChartTool = {
     execute: async ({ ticker, period }: { ticker: string; period: string }) => {
         const normalizedTicker = ticker.toUpperCase();
         const normalizedPeriod = period || '1M';
+        // #region agent log
+        fetch('http://127.0.0.1:7299/ingest/98580928-d973-4442-9a49-20081ca81a13',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8a9847'},body:JSON.stringify({sessionId:'8a9847',location:'tools.ts:render_stock_chart',message:'Tool executing',data:{ticker:normalizedTicker,period:normalizedPeriod,backendUrl:BACKEND_URL},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         try {
             const res = await fetch(
-                `${getBaseUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&period=${normalizedPeriod}`
+                `${BACKEND_URL}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&period=${normalizedPeriod}`
             );
             if (!res.ok) {
                 return { ticker: normalizedTicker, period: normalizedPeriod, bars: [] as StockBar[], error: 'Failed to fetch market data' };
@@ -94,11 +98,13 @@ export const generateTradeReceiptTool = {
         stopLoss: number | null;
     }): Promise<TradeReceipt> => {
         const normalizedTicker = ticker.toUpperCase();
-        // Fetch current price from market data API
+        // #region agent log
+        fetch('http://127.0.0.1:7299/ingest/98580928-d973-4442-9a49-20081ca81a13',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8a9847'},body:JSON.stringify({sessionId:'8a9847',location:'tools.ts:generate_trade_receipt',message:'Tool executing',data:{ticker:normalizedTicker,qty,side,orderType,backendUrl:BACKEND_URL},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         let currentPrice = 0;
         try {
             const res = await fetch(
-                `${getBaseUrl()}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&action=quote`
+                `${BACKEND_URL}/api/market?ticker=${encodeURIComponent(normalizedTicker)}&action=quote`
             );
             if (res.ok) {
                 const quote = await res.json();
