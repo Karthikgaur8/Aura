@@ -36,7 +36,7 @@ export default function ChatMessages({ messages, isLoading }: ChatMessagesProps)
         <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="w-full max-w-xl mx-auto flex-1 min-h-0"
+            className="w-full max-w-2xl mx-auto flex-1 min-h-0"
         >
             <div
                 ref={scrollRef}
@@ -59,23 +59,10 @@ export default function ChatMessages({ messages, isLoading }: ChatMessagesProps)
                                 {/* Text Bubble (only render if there's text) */}
                                 {msg.content && (
                                     <div
-                                        className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${msg.role === 'user'
-                                            ? 'rounded-br-md self-end'
-                                            : 'rounded-bl-md self-start'
+                                        className={`max-w-[80%] px-4 py-2.5 text-[15px] leading-relaxed ${msg.role === 'user'
+                                                ? 'rounded-2xl rounded-br-sm self-end bg-zinc-100 text-zinc-950 font-medium shadow-sm'
+                                                : 'rounded-2xl rounded-bl-sm self-start bg-zinc-900 border border-zinc-800 text-zinc-300 shadow-sm'
                                             }`}
-                                        style={
-                                            msg.role === 'user'
-                                                ? {
-                                                    background: 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(139,92,246,0.15))',
-                                                    border: '1px solid rgba(139,92,246,0.2)',
-                                                    color: '#e4e4e7',
-                                                }
-                                                : {
-                                                    background: 'rgba(255,255,255,0.05)',
-                                                    border: '1px solid rgba(255,255,255,0.08)',
-                                                    color: '#d4d4d8',
-                                                }
-                                        }
                                     >
                                         {msg.content}
                                     </div>
@@ -107,17 +94,12 @@ export default function ChatMessages({ messages, isLoading }: ChatMessagesProps)
                             className="flex justify-start"
                         >
                             <div
-                                className="flex items-center gap-1.5 rounded-2xl rounded-bl-md px-4 py-3"
-                                style={{
-                                    background: 'rgba(255,255,255,0.05)',
-                                    border: '1px solid rgba(255,255,255,0.08)',
-                                }}
+                                className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm px-4 py-3 bg-zinc-900 border border-zinc-800 shadow-sm"
                             >
                                 {[0, 1, 2].map((i) => (
                                     <motion.span
                                         key={i}
-                                        className="block w-1.5 h-1.5 rounded-full"
-                                        style={{ background: '#8b5cf6' }}
+                                        className="block w-1.5 h-1.5 rounded-full bg-zinc-500"
                                         animate={{
                                             opacity: [0.3, 1, 0.3],
                                             scale: [0.85, 1.15, 0.85],

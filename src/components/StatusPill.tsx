@@ -17,18 +17,18 @@ interface StatusPillProps {
 
 const VARIANT_STYLES = {
     default: {
-        bg: 'rgba(139,92,246,0.12)',
-        border: 'rgba(139,92,246,0.2)',
-        dot: '#8b5cf6',
+        bg: 'rgba(24,24,27,0.8)',
+        border: 'rgba(39,39,42,0.8)',
+        dot: '#d4d4d8', // zinc-300
     },
     success: {
-        bg: 'rgba(34,197,94,0.12)',
-        border: 'rgba(34,197,94,0.2)',
+        bg: 'rgba(24,24,27,0.8)',
+        border: 'rgba(34,197,94,0.4)',
         dot: '#22c55e',
     },
     warning: {
-        bg: 'rgba(245,158,11,0.12)',
-        border: 'rgba(245,158,11,0.2)',
+        bg: 'rgba(24,24,27,0.8)',
+        border: 'rgba(245,158,11,0.4)',
         dot: '#f59e0b',
     },
 };
@@ -61,7 +61,7 @@ export default function StatusPill({ text, icon, visible, variant = 'default' }:
 
                     {icon && <span className="text-xs">{icon}</span>}
 
-                    <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                    <span className="text-xs font-medium text-zinc-300">
                         {text}
                     </span>
                 </motion.div>

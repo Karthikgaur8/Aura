@@ -20,19 +20,12 @@ import type { TradeOrder } from '@/types';
 import { useAuraChat } from '@/hooks/useAuraChat';
 import { useTradeExecution } from '@/hooks/useTradeExecution';
 
-// Components
-import MorphingOrb from '@/components/MorphingOrb';
-
 import ChatInput from '@/components/ChatInput';
 import StockChart from '@/components/StockChart';
 import TradeReceiptCard from '@/components/TradeReceipt';
 import SlideToConfirm from '@/components/SlideToConfirm';
 import ConfettiSuccess from '@/components/ConfettiSuccess';
-import ParticleField from '@/components/ParticleField';
-import CursorGlow from '@/components/CursorGlow';
-import AuroraBackground from '@/components/AuroraBackground';
 import ChatMessages, { type ChatMessage } from '@/components/ChatMessages';
-import TickerTape from '@/components/TickerTape';
 import PortfolioDashboard from '@/components/PortfolioDashboard';
 import AIThinkingChain from '@/components/AIThinkingChain';
 import StatusPill from '@/components/StatusPill';
@@ -55,21 +48,12 @@ export default function Home() {
   const chat = useAuraChat();
   const trade = useTradeExecution();
 
-  // Screen phases
-  const [showIntro, setShowIntro] = useState(true);
-
   // UI state
   const [showConfetti, setShowConfetti] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
 
   // appState comes from chat hook (auto-managed by tool invocations)
   const appState = chat.appState;
-
-  // ── Cinematic intro timer ──
-  useEffect(() => {
-    const t = setTimeout(() => setShowIntro(false), 3800);
-    return () => clearTimeout(t);
-  }, []);
 
 
 
@@ -129,103 +113,18 @@ export default function Home() {
     setShowThinking(false);
   }, [chat]);
 
-  // Determine orb active state
-  const isOrbActive = chat.isLoading || showThinking;
+  // Determine if AI is thinking
+  const isThinking = chat.isLoading || showThinking;
 
   // ════════════════════════════════════════════════════════
-  //  PHASE 1: CINEMATIC INTRO
-  // ════════════════════════════════════════════════════════
-  if (showIntro) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center film-grain"
-        style={{ background: '#0a0a0f' }}>
-        <motion.div className="flex flex-col items-center gap-6">
-          <motion.div
-            className="relative"
-            initial={{ scale: 0, opacity: 0, rotate: -180 }}
-            animate={{ scale: 1, opacity: 1, rotate: 0 }}
-            transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <motion.div
-              className="absolute -inset-16"
-              style={{
-                background: 'radial-gradient(circle, rgba(139,92,246,0.2) 0%, rgba(34,197,94,0.05) 50%, transparent 70%)',
-                filter: 'blur(40px)',
-              }}
-              animate={{ scale: [1, 1.3, 1], opacity: [0.5, 0.8, 0.5] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            />
-            <MorphingOrb isCompact={false} isActive={true} />
-          </motion.div>
-
-          <motion.div
-            className="overflow-hidden"
-            initial={{ width: 0 }}
-            animate={{ width: 'auto' }}
-            transition={{ delay: 0.8, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <motion.h1
-              className="text-7xl font-bold text-gradient-animated whitespace-nowrap"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.9, duration: 0.4 }}
-            >
-              Aura
-            </motion.h1>
-          </motion.div>
-
-          <motion.p
-            className="text-lg tracking-[0.3em] uppercase"
-            style={{ color: 'rgba(255,255,255,0.25)' }}
-            initial={{ opacity: 0, y: 15, filter: 'blur(4px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-            transition={{ delay: 1.6, duration: 0.6 }}
-          >
-            Talk · See · Trade
-          </motion.p>
-
-          <motion.div
-            className="h-px rounded"
-            style={{ background: 'linear-gradient(90deg, transparent, rgba(139,92,246,0.5), transparent)' }}
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: '200px', opacity: 1 }}
-            transition={{ delay: 2.0, duration: 0.8 }}
-          />
-
-          <motion.div
-            className="fixed inset-0 pointer-events-none"
-            style={{ background: '#0a0a0f' }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 3.0, duration: 0.8 }}
-          />
-        </motion.div>
-      </div>
-    );
-  }
-
-
-
-  // ════════════════════════════════════════════════════════
-  //  PHASE 3: MAIN APP
+  //  MAIN APP LAYOUT
   // ════════════════════════════════════════════════════════
   return (
     <LayoutGroup>
-      <div className="relative min-h-screen w-full overflow-hidden film-grain"
-        style={{ background: '#0a0a0f' }}>
-
-        {/* Background layers */}
-        <AuroraBackground />
-        <ParticleField />
-        <CursorGlow />
-
-        {/* ── Ticker Tape (top) ── */}
-        <div className="fixed top-0 left-0 right-0 z-50">
-          <TickerTape />
-        </div>
+      <div className="relative min-h-screen w-full overflow-hidden bg-zinc-950 text-zinc-50">
 
         {/* ── Content ── */}
-        <div className="relative z-10 min-h-screen flex flex-col pt-8">
+        <div className="relative z-10 min-h-screen flex flex-col pt-4">
 
           {/* ── Top header bar ── */}
           <AnimatePresence>
@@ -234,20 +133,15 @@ export default function Home() {
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
-                className="fixed top-8 left-0 right-0 z-40 px-6 py-3"
-                style={{ background: 'linear-gradient(to bottom, rgba(10,10,15,0.95) 0%, transparent 100%)' }}
+                className="fixed top-0 left-0 right-0 z-40 px-6 py-4 bg-zinc-950/80 backdrop-blur-md border-b border-white/5"
               >
-                <div className="flex items-center gap-3">
-                  <div className="cursor-pointer" onClick={resetToEntry} title="Back to home">
-                    <MorphingOrb isCompact isActive={isOrbActive} />
+                <div className="flex items-center gap-3 w-full max-w-5xl mx-auto">
+                  <div className="cursor-pointer flex items-center gap-2" onClick={resetToEntry} title="Back to home">
+                    <div className="w-3 h-3 rounded-full bg-white flex items-center justify-center">
+                      {isThinking && <div className="w-1.5 h-1.5 rounded-full bg-zinc-950 animate-pulse" />}
+                    </div>
+                    <span className="text-sm font-bold tracking-wide text-white">Aura</span>
                   </div>
-                  <motion.span
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="text-sm font-bold text-gradient-animated"
-                  >
-                    Aura
-                  </motion.span>
 
                   <div className="ml-auto flex items-center gap-4">
                     <StatusPill
@@ -277,72 +171,90 @@ export default function Home() {
             {appState === 'entry' && (
               <motion.div
                 key="entry"
-                className="flex-1 flex flex-col items-center justify-center gap-5 px-6"
+                className="flex-1 flex flex-col w-full items-center px-4 md:px-6"
                 {...pageTransition}
               >
-                <motion.div
-                  initial={{ opacity: 0, y: -20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="text-center mb-2"
-                >
-                  <h1 className="text-5xl font-bold text-gradient-animated mb-2">
-                    Aura
-                  </h1>
-                  <p className="text-sm tracking-widest uppercase"
-                    style={{ color: 'rgba(255,255,255,0.3)' }}>
-                    Talk · See · Trade
-                  </p>
-                </motion.div>
-
-                {/* Morphing Orb */}
-                <motion.div
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ delay: 0.1, type: 'spring', stiffness: 200 }}
-                >
-                  <MorphingOrb isCompact={false} isActive={isOrbActive} />
-                </motion.div>
-
-                {/* Status pill */}
-                <StatusPill
-                  text={
-                    showThinking ? 'Analyzing…' :
-                      chat.isLoading ? 'Thinking…' :
-                        'Type your question below'
-                  }
-                  icon={
-                    showThinking ? '🧠' :
-                      chat.isLoading ? '🧠' : '💬'
-                  }
-                  visible={true}
-                />
-
-                {/* AI Thinking Chain */}
-                <AnimatePresence>
-                  {showThinking && (
-                    <AIThinkingChain isActive={showThinking} onComplete={() => { }} />
-                  )}
-                </AnimatePresence>
-
-                {/* Chat messages + input */}
-                <AnimatePresence>
-                  {!showThinking && (
+                {/* ─── NO MESSAGES: Centered hero ─── */}
+                {adaptedMessages.length === 0 && !showThinking && (
+                  <div className="flex-1 flex flex-col w-full items-center justify-center gap-6">
                     <motion.div
-                      initial={{ opacity: 0, y: 20 }}
+                      initial={{ opacity: 0, y: -20 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 20 }}
-                      className="w-full max-w-xl flex flex-col gap-3"
+                      className="flex flex-col items-center gap-4 text-center mb-2"
                     >
-                      <ChatMessages messages={adaptedMessages} isLoading={chat.isLoading} />
+                      <div className="w-12 h-12 rounded-[14px] bg-white flex items-center justify-center shadow-[0_0_40px_rgba(255,255,255,0.15)]">
+                        <div className={`w-4 h-4 rounded-full bg-zinc-950 ${isThinking ? 'animate-pulse' : ''}`} />
+                      </div>
+                      <div>
+                        <h1 className="text-4xl font-semibold tracking-tight text-white mb-2">
+                          Aura
+                        </h1>
+                        <p className="text-sm tracking-widest uppercase text-zinc-500">
+                          See · Trade · Profit
+                        </p>
+                      </div>
+                    </motion.div>
+
+                    <StatusPill
+                      text="Type your question below"
+                      icon="💬"
+                      visible={true}
+                    />
+
+                    <div className="w-full max-w-2xl mt-4">
                       <ChatInput
                         value={chat.input}
                         onChange={(val) => chat.setInput(val)}
                         onSubmit={handleChatSubmit}
                         isLoading={chat.isLoading}
                       />
+                    </div>
+                  </div>
+                )}
+
+                {/* ─── HAS MESSAGES: Messaging layout ─── */}
+                {(adaptedMessages.length > 0 || showThinking) && (
+                  <div className="flex-1 flex flex-col w-full max-w-2xl min-h-0 pt-20">
+                    {/* Compact header — Aura branding top-left */}
+                    <motion.div
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="flex items-center gap-3 py-4 shrink-0"
+                    >
+                      <div className="w-6 h-6 rounded-[8px] bg-white flex items-center justify-center">
+                        <div className={`w-2 h-2 rounded-full bg-zinc-950 ${isThinking ? 'animate-pulse' : ''}`} />
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-semibold tracking-tight text-white leading-none">Aura</h2>
+                        <p className="text-[10px] tracking-widest uppercase mt-0.5 text-zinc-500">
+                          {chat.isLoading ? 'Typing…' : 'Online'}
+                        </p>
+                      </div>
                     </motion.div>
-                  )}
-                </AnimatePresence>
+
+                    {/* Messages area — scrollable */}
+                    <div className="flex-1 overflow-y-auto scrollbar-thin min-h-0 pb-4">
+                      <ChatMessages messages={adaptedMessages} isLoading={chat.isLoading} />
+
+                      {/* AI Thinking Chain */}
+                      <AnimatePresence>
+                        {showThinking && (
+                          <AIThinkingChain isActive={showThinking} onComplete={() => { }} />
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    {/* Pinned chat input at bottom */}
+                    <div className="shrink-0 pb-4 pt-2 w-full max-w-2xl mx-auto">
+                      <ChatInput
+                        value={chat.input}
+                        onChange={(val) => chat.setInput(val)}
+                        onSubmit={handleChatSubmit}
+                        isLoading={chat.isLoading}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Error display */}
                 {chat.error && (
