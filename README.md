@@ -1,8 +1,8 @@
-# 🔮 Aura (BuffetBro)
+# 🔮 Aura
 
 **The Agent-First Brokerage.** No tabs, no spreadsheets — just talk, see, and trade.
 
-> Built at Hacklytics 2026 (Finance Track)
+> Initiated at Hacklytics 2026 (Finance Track)
 
 ## ✨ What is Aura?
 
