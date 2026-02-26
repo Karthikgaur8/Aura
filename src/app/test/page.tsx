@@ -82,9 +82,9 @@ export default function TestPage() {
                         <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
                             {m.role === 'user' ? '👤 You' : '🔮 Aura'}
                         </div>
-                        <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
+                        <div style={{ whiteSpace: 'pre-wrap' }}>{(m as any).content}</div>
                         {/* Show tool invocations */}
-                        {m.toolInvocations && m.toolInvocations.map((tool, i) => (
+                        {(m as any).toolInvocations && (m as any).toolInvocations.map((tool: any, i: number) => (
                             <div key={i} style={{ marginTop: 8, padding: 8, background: '#222', borderRadius: 6, fontSize: 12 }}>
                                 <div style={{ color: '#8b5cf6' }}>🔧 Tool: {tool.toolName}</div>
                                 <div style={{ color: '#888' }}>Args: {JSON.stringify(tool.args)}</div>
@@ -172,8 +172,8 @@ export default function TestPage() {
                 {messages.length > 0 && (
                     <button
                         onClick={() => {
-                            const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.content);
-                            if (lastAssistant) speak(lastAssistant.content);
+                            const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && (m as any).content);
+                            if (lastAssistant) speak((lastAssistant as any).content);
                         }}
                         style={{ padding: '8px 16px', background: '#1a2e1a', border: '1px solid #333', borderRadius: 8, color: '#e0e0e0', cursor: 'pointer', fontSize: 13 }}
                     >

@@ -6,7 +6,9 @@
 
 'use client';
 
-import { useChat, type Message } from 'ai/react';
+import { useChat } from '@ai-sdk/react';
+import { DefaultChatTransport } from 'ai';
+import type { UIMessage } from 'ai';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { StockBar, TradeReceipt, AppState } from '@/types';
 
@@ -40,18 +42,27 @@ function sanitizeForSpeech(text: string): string {
 
 export function useAuraChat(options?: { onFinish?: (text: string) => void }) {
     const chat = useChat({
-        api: '/api/chat',
-        initialMessages: [],
-        onFinish: (message) => {
-            if (options?.onFinish && message.content) {
-                options.onFinish(sanitizeForSpeech(message.content));
+        transport: new DefaultChatTransport({ api: '/api/chat' }),
+        onFinish: (message: any) => {
+            console.log('[useAuraChat] onFinish fired, message:', JSON.stringify(message).slice(0, 200));
+            if (options?.onFinish && (message as any).content) {
+                options.onFinish(sanitizeForSpeech((message as any).content));
             }
         },
+        onError: (error: any) => {
+            console.error('[useAuraChat] onError fired:', error);
+        },
     });
+
+    // Debug: log status and message count changes
+    useEffect(() => {
+        console.log('[useAuraChat] status:', chat.status, '| messages:', chat.messages.length);
+    }, [chat.status, chat.messages]);
 
     const [chartData, setChartData] = useState<ChartData | null>(null);
     const [tradeReceipt, setTradeReceipt] = useState<TradeReceipt | null>(null);
     const [appState, setAppState] = useState<AppState>('entry');
+    const [input, setInput] = useState('');
 
     const clearedReceiptIds = useRef<Set<string>>(new Set());
     // Use refs for dedup — avoids putting chartData/tradeReceipt in the dep array
@@ -60,6 +71,7 @@ export function useAuraChat(options?: { onFinish?: (text: string) => void }) {
 
     // Parse tool invocations — only depends on messages, uses refs for dedup
     useEffect(() => {
+        console.log('[useAuraChat] parseTools effect — message count:', chat.messages.length);
         if (!chat.messages.length) return;
 
         let foundChart: ChartData | null = null;
@@ -68,23 +80,33 @@ export function useAuraChat(options?: { onFinish?: (text: string) => void }) {
 
         for (let i = chat.messages.length - 1; i >= 0; i--) {
             const m = chat.messages[i];
-            if (m.role !== 'assistant' || !m.toolInvocations) continue;
+            if (m.role !== 'assistant' || !m.parts) continue;
 
-            for (const invocation of m.toolInvocations) {
-                if (invocation.state !== 'result') continue;
+            // In ai@6.x, tool parts have types like 'tool-render_stock_chart'
+            const toolParts = m.parts.filter((p: any) =>
+                typeof p.type === 'string' && p.type.startsWith('tool-')
+            );
 
-                if (invocation.toolName === 'render_stock_chart' && invocation.result && !foundChart) {
-                    foundChart = invocation.result as ChartData;
+            for (const part of toolParts) {
+                const toolName = (part as any).type.replace('tool-', '');
+                const state = (part as any).state;
+                const result = (part as any).output ?? (part as any).result;
+                const toolCallId = (part as any).toolCallId;
+
+                if (state !== 'output-available' && state !== 'result') continue;
+
+                if (toolName === 'render_stock_chart' && result && !foundChart) {
+                    foundChart = result as ChartData;
                 }
 
                 if (
-                    invocation.toolName === 'generate_trade_receipt' &&
-                    invocation.result &&
+                    toolName === 'generate_trade_receipt' &&
+                    result &&
                     !foundReceipt &&
-                    !clearedReceiptIds.current.has(invocation.toolCallId)
+                    !clearedReceiptIds.current.has(toolCallId)
                 ) {
-                    foundReceipt = invocation.result as TradeReceipt;
-                    foundReceiptId = invocation.toolCallId;
+                    foundReceipt = result as TradeReceipt;
+                    foundReceiptId = toolCallId;
                 }
             }
 
@@ -95,7 +117,7 @@ export function useAuraChat(options?: { onFinish?: (text: string) => void }) {
         const receiptKey = foundReceipt ? JSON.stringify(foundReceipt) : '';
 
         // #region agent log
-        fetch('http://127.0.0.1:7299/ingest/98580928-d973-4442-9a49-20081ca81a13',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8a9847'},body:JSON.stringify({sessionId:'8a9847',location:'useAuraChat.ts:parseTools',message:'Parsing tool invocations',data:{hasChart:!!foundChart,hasReceipt:!!foundReceipt,chartChanged:chartKey!==prevChartKey.current,receiptChanged:receiptKey!==prevReceiptKey.current,msgCount:chat.messages.length},timestamp:Date.now()})}).catch(()=>{});
+
         // #endregion
 
         // Receipt takes priority over chart for appState
@@ -134,30 +156,48 @@ export function useAuraChat(options?: { onFinish?: (text: string) => void }) {
     /** Submit a message (works for both typed and voice input) */
     const submitMessage = useCallback(
         (text: string) => {
-            // Use append() to directly send the message to the API
-            // This bypasses the input state entirely, avoiding the race condition
-            // where setInput + handleSubmit could fire before React commits the state
-            chat.append({ role: 'user', content: text });
+            console.log('[useAuraChat] submitMessage called with:', text);
+            console.log('[useAuraChat] current status before send:', chat.status);
+            chat.sendMessage({ text });
         },
         [chat]
     );
+
+    const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement> | string) => {
+        if (typeof e === 'string') {
+            setInput(e);
+        } else {
+            setInput(e.target.value);
+        }
+    }, []);
+
+    const handleSubmit = useCallback((e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        console.log('[useAuraChat] handleSubmit called, input:', JSON.stringify(input));
+        if (!input.trim()) {
+            console.warn('[useAuraChat] handleSubmit: input was empty, aborting');
+            return;
+        }
+        submitMessage(input);
+        setInput('');
+    }, [input, submitMessage]);
 
     /** Get the latest text response from the assistant (for TTS) */
     const latestAssistantText = useMemo(() => {
         const lastMsg = [...chat.messages]
             .reverse()
-            .find((m: Message) => m.role === 'assistant' && m.content);
-        return lastMsg?.content || '';
+            .find((m: UIMessage) => m.role === 'assistant' && (m as any).content);
+        return (lastMsg as any)?.content || '';
     }, [chat.messages]);
 
     return {
         // Core chat
         messages: chat.messages,
-        input: chat.input,
-        setInput: chat.setInput,
-        handleSubmit: chat.handleSubmit,
-        handleInputChange: chat.handleInputChange,
-        isLoading: chat.isLoading,
+        input,
+        setInput,
+        handleSubmit,
+        handleInputChange,
+        isLoading: chat.status === 'submitted' || chat.status === 'streaming',
         error: chat.error,
         submitMessage,
 

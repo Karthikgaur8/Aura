@@ -197,6 +197,7 @@ export default function Home() {
   // ── Watch for appState changes to dismiss thinking ──
   useEffect(() => {
     if (appState !== 'entry') {
+      console.log('[page] appState changed to', appState, '→ dismissing thinking');
       setShowThinking(false);
     }
   }, [appState]);
@@ -208,18 +209,28 @@ export default function Home() {
     }
   }, [chat.error]);
 
-  // ── Dismiss thinking only after loading has actually started and finished ──
-  const hasStartedLoading = useRef(false);
+  // ── Dismiss thinking when loading finishes or messages arrive ──
+  const prevMessageCount = useRef(chat.messages.length);
   useEffect(() => {
-    if (chat.isLoading) {
-      hasStartedLoading.current = true;
-    }
+    const currentCount = chat.messages.length;
+    console.log('[page] messages effect: count=', currentCount, 'prev=', prevMessageCount.current, 'showThinking=', showThinking, 'isLoading=', chat.isLoading);
 
-    if (!chat.isLoading && showThinking && hasStartedLoading.current) {
-      const t = setTimeout(() => {
-        setShowThinking(false);
-        hasStartedLoading.current = false;
-      }, 500);
+    // Dismiss thinking if new messages appeared (response arrived)
+    if (currentCount > prevMessageCount.current && showThinking) {
+      console.log('[page] New messages arrived → dismissing thinking');
+      const t = setTimeout(() => setShowThinking(false), 300);
+      prevMessageCount.current = currentCount;
+      return () => clearTimeout(t);
+    }
+    prevMessageCount.current = currentCount;
+  }, [chat.messages.length, showThinking, chat.isLoading]);
+
+  // ── Also dismiss when status returns to ready while thinking ──
+  useEffect(() => {
+    if (!chat.isLoading && showThinking) {
+      console.log('[page] isLoading=false while showThinking=true → scheduling dismiss');
+      // Small delay in case status transitions quickly
+      const t = setTimeout(() => setShowThinking(false), 1500);
       return () => clearTimeout(t);
     }
   }, [chat.isLoading, showThinking]);
@@ -229,33 +240,56 @@ export default function Home() {
     if (!showThinking) return;
     const safety = setTimeout(() => {
       setShowThinking(false);
-      hasStartedLoading.current = false;
-    }, 20000);
+    }, 10000);
     return () => clearTimeout(safety);
   }, [showThinking]);
 
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7299/ingest/98580928-d973-4442-9a49-20081ca81a13',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8a9847'},body:JSON.stringify({sessionId:'8a9847',location:'page.tsx:stateTracker',message:'State snapshot',data:{appState,showThinking,isListening:voice.isListening,isSpeaking:voice.isSpeaking,isLoading:chat.isLoading,mode,hasChart:!!chat.chartData,hasReceipt:!!chat.tradeReceipt,hasError:!!chat.error},timestamp:Date.now()})}).catch(()=>{});
-  }, [appState, showThinking, voice.isListening, voice.isSpeaking, chat.isLoading, mode, chat.chartData, chat.tradeReceipt, chat.error]);
-  // #endregion
+
 
   // ── Adapt messages for ChatMessages component ──
-  const adaptedMessages: ChatMessage[] = chat.messages
+  const adaptedMessages: ChatMessage[] = (chat.messages as import('@ai-sdk/react').UIMessage[])
     .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .filter((m) => m.content || (m.toolInvocations && m.toolInvocations.length > 0))
-    .map((m) => ({
-      id: m.id,
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-      toolInvocations: m.toolInvocations,
-    }));
+    .filter((m) => m.parts && m.parts.length > 0)
+    .map((m) => {
+      // Debug: log part types for each message
+      const partTypes = m.parts.map((p: any) => p.type);
+      console.log('[page] message', m.id, 'role:', m.role, 'part types:', partTypes);
+
+      // ai@6.x UIMessage uses `parts` array. Text parts have type='text'.
+      // Tool parts have tool-specific types like 'tool-render_stock_chart'.
+      const textParts = m.parts
+        .filter((p: any) => p.type === 'text')
+        .map((p: any) => p.text)
+        .join('\n');
+
+      // Match any tool part: type starts with 'tool-' in ai@6.x
+      const toolParts = m.parts.filter((p: any) =>
+        typeof p.type === 'string' && p.type.startsWith('tool-')
+      );
+
+      return {
+        id: m.id,
+        role: m.role as 'user' | 'assistant',
+        content: textParts,
+        toolInvocations: toolParts.length > 0 ? toolParts.map((p: any) => ({
+          toolName: p.type.replace('tool-', ''),
+          toolCallId: p.toolCallId,
+          state: p.state === 'output-available' ? 'result' : p.state,
+          result: p.output ?? p.result,
+          args: p.input,
+        })) : undefined,
+      };
+    });
+
+  // Debug: log adapted message count
+  console.log('[page] adaptedMessages count:', adaptedMessages.length, 'raw messages:', chat.messages.length);
 
   // ── Handlers ──
   const handleChatSubmit = useCallback(() => {
+    console.log('[page] handleChatSubmit called, isBusy:', isBusyRef.current, 'chat.input:', JSON.stringify(chat.input));
     if (isBusyRef.current) return;
     setShowThinking(true);
-    chat.handleSubmit(new Event('submit') as unknown as React.FormEvent);
+    chat.handleSubmit(new Event('submit') as unknown as React.FormEvent<HTMLFormElement>);
   }, [chat]);
 
   const handleTradeConfirm = useCallback(async () => {
@@ -571,7 +605,7 @@ export default function Home() {
                   <ChatMessages messages={adaptedMessages} isLoading={chat.isLoading} />
                   <ChatInput
                     value={chat.input}
-                    onChange={(val) => chat.setInput(val)}
+                    onChange={(val) => chat.handleInputChange(val)}
                     onSubmit={handleChatSubmit}
                     isLoading={chat.isLoading}
                   />
